@@ -365,17 +365,28 @@ async function handleChatCompletions(req, res) {
 }
 
 async function handleModels(res) {
-  const ids = new Set(["perch"]);
+  const data = [{ id: "perch", object: "model", created: 0, owned_by: "perch", perch_model_id: null }];
+  const shown = new Set(["perch"]);
+  const knownIds = new Set();
   for (const m of await loadModels()) {
-    if (!m.internal) ids.add(m.id);
+    if (m.internal) continue;
+    knownIds.add(m.id);
+    // 用显示名做主 id（客户端界面友好）；技术 id 放 perch_model_id，两个都能用来 pin
+    let id = m.label || m.id;
+    if (shown.has(id)) id = m.id;
+    shown.add(id);
+    data.push({ id, object: "model", created: 0, owned_by: "perch", perch_model_id: m.id });
   }
   try {
     const session = await loadSession();
     if (session?.accessToken) {
-      for (const id of await getServerDefaultIds(session)) ids.add(id);
+      for (const id of await getServerDefaultIds(session)) {
+        if (knownIds.has(id) || shown.has(id)) continue;
+        shown.add(id);
+        data.push({ id, object: "model", created: 0, owned_by: "perch" });
+      }
     }
   } catch {}
-  const data = [...ids].map((id) => ({ id, object: "model", created: 0, owned_by: "perch" }));
   for (const t of ROOST_TIERS) {
     data.push({ id: t, object: "model", created: 0, owned_by: "perch-roost" });
   }
