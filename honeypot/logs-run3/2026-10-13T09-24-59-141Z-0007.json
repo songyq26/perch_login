@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-13T09:25:14.616Z",
+  "method": "POST",
+  "url": "https://app.perchai.app/api/perch-terminal/cli-learning",
+  "requestHeaders": {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer eyJhb…RqEZnA (1410)"
+  },
+  "requestBody": "{\"userMessage\":\"Reply with exactly one word: PONG\",\"assistantText\":\"PONG\",\"status\":\"completed\",\"personaId\":\"saffron\",\"threadId\":\"cli-cwd-b50b283234c574ef\",\"runId\":\"tkt-cli-1791883503464-0vaiwtzk\"}",
+  "status": 200,
+  "responseHeaders": {
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Tue, 13 Oct 2026 09:25:14 GMT",
+    "transfer-encoding": "chunked",
+    "vary": "Accept-Encoding, rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+  },
+  "responseBody": "{\"ok\":true,\"admitted\":0,\"memories\":[],\"audit\":{\"admit\":false,\"reason\":\"no explicit durable-memory instruction\",\"explicit\":false,\"rejectedBy\":\"not_explicit\"}}",
+  "streamed": false,
+  "ms": 361
+}

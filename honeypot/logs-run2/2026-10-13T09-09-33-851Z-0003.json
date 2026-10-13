@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-13T09:09:38.333Z",
+  "method": "POST",
+  "url": "https://app.perchai.app/api/perch-terminal/cli-context",
+  "requestHeaders": {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer eyJhb…RqEZnA (1410)"
+  },
+  "requestBody": "{\"query\":\"Reply with exactly one word: PONG\",\"limitPerScope\":8}",
+  "status": 200,
+  "responseHeaders": {
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Tue, 13 Oct 2026 09:09:38 GMT",
+    "transfer-encoding": "chunked",
+    "vary": "Accept-Encoding, rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+  },
+  "responseBody": "{\"ok\":true,\"session\":{\"userId\":\"2a9827d3-1486-46f0-a50c-66614674fba1\",\"workspaceId\":\"aee5feae-19bd-4467-acf5-80d76db1c96d\",\"orgId\":\"724de62e-7496-4024-9c65-ffa0d2816aa6\",\"planCode\":\"pro\"},\"permanentMemories\":[],\"attachments\":[]}",
+  "streamed": false,
+  "ms": 1303
+}

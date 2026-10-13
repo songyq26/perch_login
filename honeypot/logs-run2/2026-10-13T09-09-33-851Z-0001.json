@@ -1,0 +1,22 @@
+{
+  "at": "2026-10-13T09:09:35.374Z",
+  "method": "GET",
+  "url": "https://app.perchai.app/api/perch-terminal/cli-auth/config",
+  "requestHeaders": {
+    "Accept": "application/json"
+  },
+  "requestBody": null,
+  "status": 200,
+  "responseHeaders": {
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Tue, 13 Oct 2026 09:09:35 GMT",
+    "transfer-encoding": "chunked",
+    "vary": "Accept-Encoding, rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+  },
+  "responseBody": "{\"ok\":true,\"appUrl\":\"https://app.perchai.app\",\"supabaseUrl\":\"https://zlfuvsfjtgsdtqcaykia.supabase.co\",\"supabaseAnonKey\":\"sb_publishable_w4R_pNkUpygBFIljZCoOlA_67ACg0FO\",\"providers\":[\"google\",\"github\"],\"redirectHost\":\"127.0.0.1\"}",
+  "streamed": false,
+  "ms": 719
+}

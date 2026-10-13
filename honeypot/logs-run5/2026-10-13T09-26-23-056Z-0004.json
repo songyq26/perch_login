@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-13T09:26:27.349Z",
+  "method": "POST",
+  "url": "https://app.perchai.app/api/perch-terminal/turn-ticket",
+  "requestHeaders": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer eyJhb…RqEZnA (1410)",
+    "User-Agent": "perchai-cli/unknown"
+  },
+  "requestBody": "{\"surface\":\"cli\",\"profile\":\"standard\"}",
+  "status": 200,
+  "responseHeaders": {
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Tue, 13 Oct 2026 09:26:27 GMT",
+    "transfer-encoding": "chunked",
+    "vary": "Accept-Encoding, rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+  },
+  "responseBody": "{\"ok\":true,\"ticket\":\"eyJ0aWQiOiIyMDI1ZmY3YS05NjhmLTQxZjMtYmRhYi0wMzkyNzlmN2I0YTgiLCJ1aWQiOiIyYTk4MjdkMy0xNDg2LTQ2ZjAtYTUwYy02NjYxNDY3NGZiYTEiLCJ3aWQiOiJhZWU1ZmVhZS0xOWJkLTQ0NjctYWNmNS04MGQ3NmRiMWM5NmQiLCJzdXJmYWNlIjoiY2xpIiwicGxhbiI6InBybyIsInJ1biI6InRrdC1jbGktMTc5MTg4MzU4NzIzOC1kNmwzNWI3eCIsImV4cCI6MTc5MTg4Mzg4N30.m3Z7zPINR2bT9m-FPlh3Rk_jjsl0v84DF_ymmkDWEss\",\"ticketId\":\"2025ff7a-968f-41f3-bdab-039279f7b4a8\",\"runId\":\"tkt-cli-1791883587238-d6l35b7x\",\"surface\":\"cli\",\"profile\":\"standard\",\"enforced\":false,\"expiresAt\":\"2026-10-13T09:31:27.288Z\"}",
+  "streamed": false,
+  "ms": 436
+}

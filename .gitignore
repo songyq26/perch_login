@@ -1,0 +1,10 @@
+# 运行时凭证（绝不入库）
+token.json
+api-key.txt
+honeypot/.perch/mcp.json
+
+# 运行时状态与构建产物
+state/
+__pycache__/
+*.pyc
+.DS_Store

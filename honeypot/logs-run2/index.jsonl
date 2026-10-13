@@ -1,0 +1,8 @@
+{"id":"2026-10-13T09-09-33-851Z-0001","at":"2026-10-13T09:09:35.374Z","method":"GET","url":"https://app.perchai.app/api/perch-terminal/cli-auth/config","status":200,"ms":719,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0002","at":"2026-10-13T09:09:36.987Z","method":"GET","url":"https://app.perchai.app/api/perch-terminal/public-model-default","status":200,"ms":233,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0003","at":"2026-10-13T09:09:38.333Z","method":"POST","url":"https://app.perchai.app/api/perch-terminal/cli-context","status":200,"ms":1303,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0004","at":"2026-10-13T09:09:38.818Z","method":"POST","url":"https://app.perchai.app/api/perch-terminal/turn-ticket","status":200,"ms":463,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0005","at":"2026-10-13T09:09:42.119Z","method":"POST","url":"https://app.perchai.app/api/perch-terminal/cli-context","status":200,"ms":1198,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0006","at":"2026-10-13T09:09:46.259Z","method":"POST","url":"https://app.perchai.app/api/perch-terminal/model-call","status":200,"ms":1136,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0007","at":"2026-10-13T09:09:47.493Z","method":"POST","url":"https://app.perchai.app/api/perch-terminal/cli-turn","status":200,"ms":1184,"note":null}
+{"id":"2026-10-13T09-09-33-851Z-0008","at":"2026-10-13T09:09:47.866Z","method":"POST","url":"https://app.perchai.app/api/perch-terminal/cli-learning","status":200,"ms":351,"note":null}

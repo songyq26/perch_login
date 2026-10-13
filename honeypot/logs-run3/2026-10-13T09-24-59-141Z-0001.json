@@ -1,0 +1,23 @@
+{
+  "at": "2026-10-13T09:25:00.790Z",
+  "method": "GET",
+  "url": "https://app.perchai.app/api/perch-terminal/public-model-default",
+  "requestHeaders": {
+    "Accept": "application/json",
+    "Authorization": "Bearer eyJhb…RqEZnA (1410)"
+  },
+  "requestBody": null,
+  "status": 200,
+  "responseHeaders": {
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Tue, 13 Oct 2026 09:25:00 GMT",
+    "transfer-encoding": "chunked",
+    "vary": "Accept-Encoding, rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+  },
+  "responseBody": "{\"ok\":true,\"selection\":{\"thinkingMode\":false,\"chatModelId\":\"wandb-kimi-k2-6\",\"sandboxPlannerModelId\":\"wandb-kimi-k2-6\",\"reportModelId\":\"wandb-kimi-k2-6\",\"thinkingModelId\":\"wandb-kimi-k2-6\",\"supervisorModelId\":\"wandb-kimi-k2-6\",\"fastWorkerModelId\":\"wandb-kimi-k2-6\",\"codeWorkerModelId\":\"wandb-kimi-k2-6\",\"dataWorkerModelId\":\"wandb-kimi-k2-6\",\"writerModelId\":\"wandb-kimi-k2-6\",\"visionModelId\":\"wandb-kimi-k2-6\",\"verifierModelId\":\"wandb-kimi-k2-6\",\"visionFallbackModelIds\":null,\"modelBackendPreset\":\"wandb_kimi\"},\"updatedAt\":\"2026-06-14T10:12:25.916728+00:00\",\"updatedBy\":\"770d3d54-42d5-4b52-a0a4-4be498528e2e\",\"source\":\"database\"}",
+  "streamed": false,
+  "ms": 904
+}

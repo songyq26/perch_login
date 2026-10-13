@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "generated": "2026-10-13T11:47:27.867605Z",
+    "total_records": 38,
+    "log_dirs": [
+      "logs-run1",
+      "logs",
+      "logs-run3",
+      "logs-run4",
+      "logs-run5",
+      "logs-run2"
+    ]
+  },
+  "endpoint_status_matrix": {
+    "/api/perch-terminal/cli-auth/config 200": 1,
+    "/api/perch-terminal/cli-context 200": 11,
+    "/api/perch-terminal/cli-learning 200": 5,
+    "/api/perch-terminal/cli-turn 200": 5,
+    "/api/perch-terminal/model-call 200": 5,
+    "/api/perch-terminal/public-model-default 200": 5,
+    "/api/perch-terminal/turn-ticket 200": 5,
+    "/api/perchai/account 200": 1
+  },
+  "status_counts": {
+    "200": 38
+  },
+  "endpoint_latency_ms": {
+    "/api/perch-terminal/cli-context": {
+      "count": 11,
+      "mean": 1815.2,
+      "min": 1034,
+      "max": 5896
+    },
+    "/api/perch-terminal/public-model-default": {
+      "count": 5,
+      "mean": 736.6,
+      "min": 233,
+      "max": 904
+    },
+    "/api/perch-terminal/turn-ticket": {
+      "count": 5,
+      "mean": 490.0,
+      "min": 436,
+      "max": 572
+    },
+    "/api/perch-terminal/model-call": {
+      "count": 5,
+      "mean": 1180.6,
+      "min": 1048,
+      "max": 1317
+    },
+    "/api/perch-terminal/cli-turn": {
+      "count": 5,
+      "mean": 1256.0,
+      "min": 1180,
+      "max": 1326
+    },
+    "/api/perch-terminal/cli-learning": {
+      "count": 5,
+      "mean": 357.2,
+      "min": 345,
+      "max": 373
+    },
+    "/api/perchai/account": {
+      "count": 1,
+      "mean": 1098.0,
+      "min": 1098,
+      "max": 1098
+    },
+    "/api/perch-terminal/cli-auth/config": {
+      "count": 1,
+      "mean": 719.0,
+      "min": 719,
+      "max": 719
+    }
+  },
+  "errors": []
+}

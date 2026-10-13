@@ -1,0 +1,23 @@
+{
+  "at": "2026-10-13T09:26:25.810Z",
+  "method": "GET",
+  "url": "https://app.perchai.app/api/perchai/account",
+  "requestHeaders": {
+    "Accept": "application/json",
+    "Authorization": "Bearer eyJhb…RqEZnA (1410)"
+  },
+  "requestBody": null,
+  "status": 200,
+  "responseHeaders": {
+    "alt-svc": "h3=\":443\"; ma=2592000",
+    "cache-control": "no-store",
+    "content-encoding": "gzip",
+    "content-type": "application/json",
+    "date": "Tue, 13 Oct 2026 09:26:25 GMT",
+    "transfer-encoding": "chunked",
+    "vary": "Accept-Encoding, rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch"
+  },
+  "responseBody": "{\"ok\":true,\"profile\":{\"id\":\"2a9827d3-1486-46f0-a50c-66614674fba1\",\"email\":\"uestc2902102007@gmail.com\",\"name\":\"宋运奇\"},\"session\":{\"userId\":\"2a9827d3-1486-46f0-a50c-66614674fba1\",\"orgId\":\"724de62e-7496-4024-9c65-ffa0d2816aa6\",\"workspaceId\":\"aee5feae-19bd-4467-acf5-80d76db1c96d\",\"planCode\":\"pro\",\"planName\":\"Pro\",\"membershipRole\":\"member\",\"tierSelectionRequired\":false,\"entitlements\":[{\"key\":\"admin.console\",\"value_json\":{\"enabled\":false}},{\"key\":\"agents.cloud\",\"value_json\":{\"enabled\":true}},{\"key\":\"agents.remote\",\"value_json\":{\"enabled\":true}},{\"key\":\"ap.audit\",\"value_json\":{\"enabled\":true}},{\"key\":\"auth.access_codes.redeem\",\"value_json\":{\"enabled\":true}},{\"key\":\"billing.overage\",\"value_json\":{\"enabled\":false}},{\"key\":\"coding.workspace\",\"value_json\":{\"enabled\":true}},{\"key\":\"desktop.runtime\",\"value_json\":{\"enabled\":true}},{\"key\":\"financial.suite\",\"value_json\":{\"enabled\":true}},{\"key\":\"flock.enabled\",\"value_json\":{\"enabled\":true}},{\"key\":\"limits.allowed_models\",\"value_json\":{\"models\":[\"*\"]}},{\"key\":\"limits.daily_runs\",\"value_json\":{\"limit\":null}},{\"key\":\"limits.max_context_tokens\",\"value_json\":{\"limit\":200000}},{\"key\":\"limits.weekly_runs\",\"value_json\":{\"limit\":null}},{\"key\":\"models.byok\",\"value_json\":{\"enabled\":true}},{\"key\":\"models.byolm\",\"value_json\":{\"enabled\":false}},{\"key\":\"models.manual_select\",\"value_json\":{\"enabled\":true}},{\"key\":\"notifications.push\",\"value_json\":{\"enabled\":true}},{\"key\":\"shell.preview\",\"value_json\":{\"enabled\":true}},{\"key\":\"writing.studio\",\"value_json\":{\"enabled\":true}},{\"key\":\"writing.studio.web\",\"value_json\":{\"enabled\":true}}]},\"usageMeter\":{\"dailyPt\":2705,\"weeklyPt\":2705,\"dailyUsd\":2.70480603,\"weeklyUsd\":2.70480603,\"monthlyUsd\":2.70480603,\"dailyTokens\":17656096,\"weeklyTokens\":17656096,\"monthlyTokens\":17656096,\"dailyCalls\":188,\"weeklyCalls\":188,\"monthlyCalls\":188,\"monthlyManualPt\":2670,\"roostRolling\":{\"enabled\":true,\"window5hUsd\":0.01077503,\"window5hCapUsd\":5,\"window5hNextFreedAt\":\"2026-10-13T09:26:36.123Z\",\"window7dUsd\":0.018812390000000002,\"window7dCapUsd\":20,\"window7dNextFreedAt\":\"2026-10-20T02:40:18.098Z\"},\"manualRolling\":{\"enabled\":true,\"window5hUsd\":0.9795822,\"window5hCapUsd\":15,\"window5hNextFreedAt\":\"2026-10-13T09:26:25.782Z\",\"window7dUsd\":2.66900664,\"window7dCapUsd\":37.5,\"window7dNextFreedAt\":\"2026-10-20T03:10:20.683Z\"}},\"billingSubscription\":{\"user_id\":\"2a9827d3-1486-46f0-a50c-66614674fba1\",\"stripe_customer_id\":\"cus_VQm58wKMQZvlHr\",\"stripe_subscription_id\":\"sub_1UPuXTCgNzWF6pMiiPY0RO1L\",\"status\":\"active\",\"current_period_end\":\"2026-11-13T01:29:23+00:00\",\"created_at\":\"2026-10-13T01:30:03.763647+00:00\",\"updated_at\":\"2026-10-13T01:30:06.616629+00:00\",\"current_period_start\":\"2026-10-13T01:29:23+00:00\"},\"creditBalancePt\":0,\"creditsEnabled\":true}",
+  "streamed": false,
+  "ms": 1098
+}
