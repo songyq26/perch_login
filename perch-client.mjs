@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Perch CLI 登录 + 发送请求流程（仅 Node 内置模块，无第三方依赖）
 //
-//   node perch-client.mjs login [--provider google|github] [--timeout 300]
+//   node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]
 //   node perch-client.mjs ask "你的问题" [--model <id或显示名>] [--telemetry]
 //   node perch-client.mjs models [--sync]
 //   node perch-client.mjs status
@@ -44,7 +44,7 @@ function pickProvider(providers, requested) {
   return null;
 }
 
-async function startCallbackServer(host, timeoutMs) {
+async function startCallbackServer(host, timeoutMs, port = 0) {
   let resolveCode;
   const codePromise = new Promise((r) => { resolveCode = r; });
   const server = createServer((req, res) => {
@@ -66,11 +66,11 @@ async function startCallbackServer(host, timeoutMs) {
   const timer = setTimeout(() => resolveCode({ ok: false, error: `等待登录超时（${Math.round(timeoutMs / 1000)} 秒）` }), timeoutMs);
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, host, resolve);
+    server.listen(port, host, resolve);
   });
-  const { port } = server.address();
+  const { port: boundPort } = server.address();
   return {
-    redirectTo: `http://${host}:${port}${CALLBACK_PATH}`,
+    redirectTo: `http://${host}:${boundPort}${CALLBACK_PATH}`,
     waitForCode: () => codePromise,
     close: () => {
       clearTimeout(timer);
@@ -96,9 +96,53 @@ async function updateSignupSource(cfg, session, signupSource) {
   } catch {}
 }
 
+function readCodeFromStdin(timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      process.stdin.off("data", onData);
+      process.stdin.pause();
+    };
+    const onData = (buf) => {
+      const lines = String(buf).split("\n").map((x) => x.trim()).filter(Boolean);
+      for (const text of lines) {
+        const codeM = /[?&]code=([^&\s]+)/.exec(text);
+        const errM = /[?&]error=([^&\s]+)/.exec(text);
+        if (codeM) {
+          cleanup();
+          resolve(decodeURIComponent(codeM[1]));
+          return;
+        }
+        if (errM) {
+          cleanup();
+          reject(new Error(`登录被拒：${decodeURIComponent(errM[1])}`));
+          return;
+        }
+      }
+      if (lines.length) {
+        cleanup();
+        resolve(lines[0]);
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`等待粘贴超时（${Math.round(timeoutMs / 1000)} 秒）`));
+    }, timeoutMs);
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", onData);
+    process.stdin.resume();
+  });
+}
+
 async function cmdLogin(args) {
   const providerArg = flagValue(args, "--provider");
   const timeoutSec = Number(flagValue(args, "--timeout") ?? 300);
+  const portArg = flagValue(args, "--port");
+  const manual = !args.includes("--callback");
+  const port = portArg === undefined ? 0 : Number(portArg);
+  if (portArg !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+    throw new Error(`--port 需要 1-65535 的整数（收到：${portArg}）`);
+  }
 
   console.log("正在获取登录配置…");
   const cfg = await fetchAuthConfig();
@@ -106,26 +150,44 @@ async function cmdLogin(args) {
   if (!provider) throw new Error("服务端未启用任何支持 CLI 的 OAuth provider");
 
   const host = (cfg.redirectHost || "127.0.0.1").trim();
-  const server = await startCallbackServer(host, timeoutSec * 1000);
   const verifier = b64url(randomBytes(64));
   const challenge = b64url(createHash("sha256").update(verifier).digest());
 
+  let server = null;
+  let callbackUrl;
+  if (manual) {
+    const cbPort = port || 30000 + Math.floor(Math.random() * 30000);
+    callbackUrl = `http://${host}:${cbPort}${CALLBACK_PATH}`;
+  } else {
+    server = await startCallbackServer(host, timeoutSec * 1000, port);
+    callbackUrl = server.redirectTo;
+  }
+
   const url = new URL(`${cfg.supabaseUrl}/auth/v1/authorize`);
   url.searchParams.set("provider", provider);
-  url.searchParams.set("redirect_to", server.redirectTo);
+  url.searchParams.set("redirect_to", callbackUrl);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "s256");
   if (provider === "google") url.searchParams.set("prompt", "select_account");
 
   console.log(`\n请用浏览器打开以下链接完成 ${provider} 登录（${timeoutSec} 秒内有效）：\n`);
   console.log(url.toString());
-  console.log(`\n等待回调 ${server.redirectTo} …`);
 
   try {
-    const r = await server.waitForCode();
-    if (!r.ok) throw new Error(r.error);
+    let code;
+    if (manual) {
+      console.log(`\n粘贴式登录（默认模式）：登录后浏览器会跳到 ${callbackUrl}?code=…`);
+      console.log("页面显示「无法访问/连接被拒绝」是正常的——把地址栏里的完整 URL 复制下来，");
+      console.log("粘贴到本终端并回车（只粘 code 参数值也可以）：");
+      code = await readCodeFromStdin(timeoutSec * 1000);
+    } else {
+      console.log(`\n等待回调 ${callbackUrl} …`);
+      const r = await server.waitForCode();
+      if (!r.ok) throw new Error(r.error);
+      code = r.code;
+    }
     console.log("收到授权码，正在换取会话…");
-    const data = await supabaseToken(cfg.supabaseUrl, cfg.supabaseAnonKey, "pkce", { auth_code: r.code, code_verifier: verifier });
+    const data = await supabaseToken(cfg.supabaseUrl, cfg.supabaseAnonKey, "pkce", { auth_code: code, code_verifier: verifier });
     const session = sessionFromToken(data, cfg.appUrl || APP_URL);
     await updateSignupSource(cfg, session, data.user?.user_metadata?.signup_source);
     await saveSession(session);
@@ -133,7 +195,7 @@ async function cmdLogin(args) {
     console.log(`  userId: ${session.userId}`);
     console.log(`  email:  ${session.email}`);
   } finally {
-    server.close();
+    server?.close();
   }
 }
 
@@ -300,7 +362,7 @@ try {
   else if (cmd === "status") await cmdStatus();
   else if (cmd === "models") await cmdModels(args);
   else {
-    console.log('用法:\n  node perch-client.mjs login [--provider google|github] [--timeout 300]\n  node perch-client.mjs ask "你的问题" [--model <id或显示名>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs status');
+    console.log('用法:\n  node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器）\n  node perch-client.mjs ask "你的问题" [--model <id或显示名>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs status');
     process.exitCode = cmd ? 1 : 0;
   }
 } catch (e) {
