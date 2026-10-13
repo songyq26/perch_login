@@ -290,9 +290,17 @@ export function resolveTier(input) {
   return ROOST_TIERS.includes(norm) ? norm : null;
 }
 
-// 官方档位三件套（--model pro 实测：roostReasoning:true，effort 取官方默认 high）
-export function roostFields(tier) {
-  return { roostModelChoice: tier, roostReasoning: true, effort: { level: "high" } };
+// 官方档位三件套（--model pro 实测：roostReasoning 与 effort.level 联动，官方默认 high）
+// effort 级别全集（官方 jS 常量）；off ↔ reasoningEnabled:false（官方 sun() 归一化规则）
+export const ROOST_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+export function roostFields(tier, level = "high") {
+  if (!ROOST_EFFORT_LEVELS.includes(level)) {
+    throw new Error(`未知 effort 级别：${level}（可选：${ROOST_EFFORT_LEVELS.join(" / ")}）`);
+  }
+  return level === "off"
+    ? { roostModelChoice: tier, roostReasoning: false, effort: { level: "off" } }
+    : { roostModelChoice: tier, roostReasoning: true, effort: { level } };
 }
 
 // 票据管理器：官方 dBt（领票） / aue（取头部，>30s 复用、≤30s 用 renewal 续期） / yun（续期）的等价实现。

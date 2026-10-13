@@ -2,7 +2,7 @@
 // Perch CLI 登录 + 发送请求流程（仅 Node 内置模块，无第三方依赖）
 //
 //   node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]
-//   node perch-client.mjs ask "你的问题" [--model <id或显示名>] [--telemetry]
+//   node perch-client.mjs ask "你的问题" [--model <id/显示名/档位[@强度]>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]
 //   node perch-client.mjs models [--sync]
 //   node perch-client.mjs status
 //
@@ -19,7 +19,7 @@ import { promises as fs } from "node:fs";
 import {
   APP_URL, TOKEN_FILE, b64url, fetchAuthConfig, supabaseToken, sessionFromToken,
   saveSession, loadSession, ensureFresh, postJson, callModel, readSSE,
-  createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields,
+  createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS,
 } from "./perch-core.mjs";
 import { syncModels } from "./sync-models.mjs";
 
@@ -213,14 +213,18 @@ function positionalArgs(args, valueFlags) {
 }
 
 async function cmdAsk(args) {
-  const text = positionalArgs(args, ["--model"])[0];
-  if (!text) throw new Error('用法: node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>]');
+  const text = positionalArgs(args, ["--model", "--effort"])[0];
+  if (!text) throw new Error('用法: node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>] [--effort <off|low|medium|high|xhigh|max|ultra>]');
 
   const modelArg = flagValue(args, "--model");
   const tier = modelArg ? resolveTier(modelArg) : null;
   const pin = modelArg && !tier ? await resolveModel(modelArg) : null;
   if (modelArg && !pin && !tier) {
     throw new Error(`未知模型：${modelArg}（可用：模型 id/显示名见 models；档位 standard / standard_max / pro / pro_max）`);
+  }
+  const effortArg = flagValue(args, "--effort");
+  if (effortArg && !tier) {
+    throw new Error("--effort 需要配合 Roost 档位使用（官方语义里 effort 属于档位选择），例如：--model pro --effort max");
   }
 
   let session = await loadSession();
@@ -254,7 +258,7 @@ async function cmdAsk(args) {
     ...(pin
       ? { preferredModelId: pin.id, manualModelOptionId: pin.id }
       : tier
-        ? roostFields(tier)
+        ? roostFields(tier, effortArg ?? "high")
         : { preferredModelId: null }),
     avoidModelIds: [],
     attribution: {
@@ -273,11 +277,14 @@ async function cmdAsk(args) {
 
   let done = null;
   let answer = "";
+  let reasoningChars = 0;
   let streamError = null;
   await readSSE(res, (ev) => {
     if (ev.type === "answer_delta") {
       answer += ev.text ?? "";
       process.stdout.write(ev.text ?? "");
+    } else if (ev.type === "reasoning_delta") {
+      reasoningChars += (ev.text ?? "").length;
     } else if (ev.type === "done") {
       done = ev;
     } else if (ev.type === "error") {
@@ -298,7 +305,7 @@ async function cmdAsk(args) {
   }
   if (done?.ok) {
     const u = done.usage ?? {};
-    console.log(`\n[model: ${done.model ?? "?"} · ${done.durationMs ?? "?"}ms · ${u.totalTokens ?? "?"} tokens]`);
+    console.log(`\n[model: ${done.model ?? "?"} · ${done.durationMs ?? "?"}ms · ${u.totalTokens ?? "?"} tokens${reasoningChars ? ` · reasoning ${reasoningChars} 字符` : ""}]`);
     if (done.toolCalls?.length) {
       console.log("注意：模型请求了工具调用，本脚本不执行工具。");
     }
@@ -350,8 +357,10 @@ async function cmdModels(args) {
     const man = m.manualOnly ? " *" : "  ";
     console.log(`${tag}${man}${m.id.padEnd(46)} ${m.label.padEnd(26)} ${ctx}`);
   }
-  console.log(`\n共 ${models.length} 个（S=Starter 组，P=Pro 组；* = 仅手动可选，不参与自动路由）。ask --model 传左边 id 或右边显示名均可。`);
-  console.log("路由档位（也可以传给 --model）：standard / standard_max / pro / pro_max；不传 = 服务端自动路由。");
+  for (const t of ROOST_TIERS) {
+    console.log(`R   ${t.padEnd(46)} ${"Roost 路由档位（服务端挑模型）".padEnd(26)} —`);
+  }
+  console.log(`\n共 ${models.length} 个模型 + ${ROOST_TIERS.length} 个路由档位（S=Starter 组，P=Pro 组，R=Roost 档位；* = 仅手动可选，不参与自动路由）。ask --model 传左边 id / 显示名 / 档位均可。`);
   console.log("CLI 更新后用 models --sync 或 node sync-models.mjs 刷新本列表。");
 }
 
@@ -362,7 +371,7 @@ try {
   else if (cmd === "status") await cmdStatus();
   else if (cmd === "models") await cmdModels(args);
   else {
-    console.log('用法:\n  node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器）\n  node perch-client.mjs ask "你的问题" [--model <id或显示名>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs status');
+    console.log('用法:\n  node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器）\n  node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs status');
     process.exitCode = cmd ? 1 : 0;
   }
 } catch (e) {

@@ -18,7 +18,7 @@ import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS } from "./perch-core.mjs";
+import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, ROOST_EFFORT_LEVELS } from "./perch-core.mjs";
 import { syncIfStale } from "./sync-models.mjs";
 
 const args = process.argv.slice(2);
@@ -234,7 +234,18 @@ async function handleChatCompletions(req, res) {
   const includeUsage = body.stream_options?.include_usage === true;
   const requestedModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : "perch";
   const isAuto = /^(perch|perch-default|default)$/i.test(requestedModel);
-  const tier = isAuto ? null : resolveTier(requestedModel);
+  // 支持 "档位@强度" 写法（如 pro@max / pro@off），强度默认 high
+  let tierPart = requestedModel;
+  let effortLevel = "high";
+  if (!isAuto && requestedModel.includes("@")) {
+    const at = requestedModel.indexOf("@");
+    tierPart = requestedModel.slice(0, at);
+    effortLevel = requestedModel.slice(at + 1);
+    if (!ROOST_EFFORT_LEVELS.includes(effortLevel)) {
+      throw httpError(400, `未知推理强度 "${effortLevel}"（可选：${ROOST_EFFORT_LEVELS.join(" / ")}），写法如 pro@max`);
+    }
+  }
+  const tier = isAuto ? null : resolveTier(tierPart);
   let pin = isAuto || tier ? null : await resolveModel(requestedModel);
   let pinFromServerDefaults = false;
   const modelLabel = requestedModel;
@@ -257,7 +268,7 @@ async function handleChatCompletions(req, res) {
       pin = { id: requestedModel, label: requestedModel, serverDefault: true };
       pinFromServerDefaults = true;
     } else {
-      throw httpError(400, `未知模型 "${requestedModel}"：用 "perch" 走服务端自动路由；或用档位 standard / standard_max / pro / pro_max；或在 GET /v1/models 里选一个可固定（pin）的模型 id（如 dashscope-deepseek-v4-1-flash / DeepSeek V4.1 Flash）`);
+      throw httpError(400, `未知模型 "${requestedModel}"：用 "perch" 走服务端自动路由；或用档位 standard / standard_max / pro / pro_max（可加推理强度，如 pro@max / pro@off）；或在 GET /v1/models 里选一个可固定（pin）的模型 id（如 dashscope-deepseek-v4-1-flash / DeepSeek V4.1 Flash）`);
     }
   }
 
@@ -282,7 +293,7 @@ async function handleChatCompletions(req, res) {
     ...(pin
       ? { preferredModelId: pin.id, manualModelOptionId: pin.id }
       : tier
-        ? roostFields(tier)
+        ? roostFields(tier, effortLevel)
         : { preferredModelId: null }),
     avoidModelIds: [],
     attribution: {
@@ -435,9 +446,9 @@ try {
       r.added.length ? `新增 ${r.added.join(", ")}` : "",
       r.removed.length ? `移除 ${r.removed.join(", ")}` : "",
     ].filter(Boolean).join("；");
-    console.log(`模型注册表已随 CLI 更新（v${r.version}，共 ${r.count} 个）${extra ? "：" + extra : ""}`);
+    console.log(`模型注册表已随 CLI 更新（v${r.version}，共 ${r.count} 个模型 + ${ROOST_TIERS.length} 个路由档位）${extra ? "：" + extra : ""}`);
   } else if (r) {
-    console.log(`模型注册表已是最新（CLI v${r.version}，${r.count} 个模型）`);
+    console.log(`模型注册表已是最新（CLI v${r.version}，${r.count} 个模型 + ${ROOST_TIERS.length} 个路由档位）`);
   } else {
     console.log("未找到 Perch CLI bundle，跳过模型注册表同步（现有 models.json 继续生效）");
   }
