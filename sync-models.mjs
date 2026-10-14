@@ -210,6 +210,35 @@ export function extractModels(s) {
     return null;
   };
 
+  // 4b) 「注册项 → 菜单 id」显式配对：{...no({…}),id:REF}
+  //     官方用它标注别名 id（真实 modelId 为完整 HF 名/条件分支/spread，
+  //     无法用 makeId 推出），如 wandb-minimax-m3、wandb-kimi-k2-7-code
+  for (const m of s.matchAll(/\}\),\s*id\s*:\s*([A-Za-z_$][\w$]*)\}/g)) {
+    const ownStart = s.lastIndexOf("no({", m.index);
+    if (ownStart === -1) continue;
+    const own = balanced(s, ownStart + 3);
+    if (!own) continue;
+    const aliasId = resolveRef(m[1]);
+    if (!aliasId) continue;
+    const ctx = /contextWindow:([\d.e+]+)/.exec(own);
+    const mo = /maxOutputTokens:([\d.e+]+)/.exec(own);
+    const label = /label:"([^"]*)"/.exec(own);
+    const reasoning = /reasoningSupport:"(\w+)"/.exec(own);
+    const eff = parseEff(own);
+    const vision = parseVision(own);
+    const prev = registry[aliasId] ?? {};
+    registry[aliasId] = {
+      ...prev,
+      contextWindow: prev.contextWindow ?? (ctx ? Number(ctx[1]) : null),
+      maxOutputTokens: prev.maxOutputTokens ?? (mo ? Number(mo[1]) : null),
+      regLabel: prev.regLabel ?? label?.[1] ?? null,
+      reasoning: prev.reasoning ?? (reasoning ? reasoning[1] !== "false" : null),
+      effortKind: prev.effortKind ?? eff?.kind ?? null,
+      effortLevels: prev.effortLevels ?? eff?.levels ?? null,
+      vision: prev.vision ?? vision,
+    };
+  }
+
   // 5) 组装清单
   const out = [];
   const seen = new Set();

@@ -1,5 +1,5 @@
 {
-  "extractedAt": "2026-10-14T02:04:35.041Z",
+  "extractedAt": "2026-10-14T02:08:47.356Z",
   "cliVersion": "2.4.108",
   "source": "/Users/songyunqi123/.nvm/versions/node/v22.23.2/lib/node_modules/perchai-cli/dist/perch.mjs",
   "models": [
@@ -351,11 +351,11 @@
       "name": "minimax-m3",
       "id": "wandb-minimax-m3",
       "label": "MiniMax M3",
-      "contextWindow": null,
+      "contextWindow": 262000,
       "maxOutputTokens": null,
-      "reasoning": null,
+      "reasoning": true,
       "effort": null,
-      "vision": null
+      "vision": true
     },
     {
       "group": "pro",
@@ -386,11 +386,11 @@
       "name": "deepseek-v4",
       "id": "wandb-deepseek-ai-deepseek-v4-pro",
       "label": "DeepSeek V4 Pro 0813",
-      "contextWindow": null,
+      "contextWindow": 1040000,
       "maxOutputTokens": null,
-      "reasoning": null,
+      "reasoning": true,
       "effort": null,
-      "vision": null
+      "vision": false
     },
     {
       "group": "pro",
@@ -428,11 +428,11 @@
       "name": "kimi-2.7",
       "id": "wandb-kimi-k2-7-code",
       "label": "Kimi K2.7 Code",
-      "contextWindow": null,
+      "contextWindow": 262144,
       "maxOutputTokens": null,
-      "reasoning": null,
+      "reasoning": true,
       "effort": null,
-      "vision": null
+      "vision": true
     },
     {
       "group": "pro",
