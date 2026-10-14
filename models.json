@@ -1,6 +1,6 @@
 {
-  "extractedAt": "2026-10-13T15:03:20.847Z",
-  "cliVersion": "2.4.107",
+  "extractedAt": "2026-10-14T00:42:15.545Z",
+  "cliVersion": "2.4.108",
   "source": "/Users/songyunqi123/.nvm/versions/node/v22.23.2/lib/node_modules/perchai-cli/dist/perch.mjs",
   "models": [
     {
@@ -10,15 +10,6 @@
       "label": "Laguna S 2.1",
       "contextWindow": 262144,
       "maxOutputTokens": 32768,
-      "manualOnly": true
-    },
-    {
-      "group": "starter",
-      "name": "qwen-3.8-27b",
-      "id": "openrouter-qwen-qwen3-8-27b",
-      "label": "Qwen 3.8 27B (Starter)",
-      "contextWindow": 262144,
-      "maxOutputTokens": null,
       "manualOnly": true
     },
     {
@@ -38,6 +29,14 @@
       "contextWindow": 1048576,
       "maxOutputTokens": null,
       "manualOnly": true
+    },
+    {
+      "group": "pro",
+      "name": "gemini-4-argon",
+      "id": "gemini-gemini-4-argon",
+      "label": "Gemini 4 Argon",
+      "contextWindow": null,
+      "maxOutputTokens": null
     },
     {
       "group": "pro",
@@ -211,15 +210,6 @@
       "id": "fireworks-accounts-fireworks-models-qwen3p7-plus",
       "label": "Qwen 3.7 Plus",
       "contextWindow": 262144,
-      "maxOutputTokens": 32000,
-      "manualOnly": true
-    },
-    {
-      "group": "pro",
-      "name": "inkling",
-      "id": "fireworks-accounts-fireworks-models-inkling",
-      "label": "Fireworks \\xB7 Inkling",
-      "contextWindow": 1048576,
       "maxOutputTokens": 32000,
       "manualOnly": true
     },
