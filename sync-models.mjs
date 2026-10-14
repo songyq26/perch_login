@@ -187,7 +187,14 @@ export function extractModels(s) {
     if (!tm) continue;
     const open = s.lastIndexOf("{", afterStart + tm.index);
     const own = balanced(s, open) ?? "";
-    templates.push({ providerId: tm[1], ids, vision: parseVision(own), effort: parseEff(own) });
+    const tctx = /contextWindow:([\d.e+]+)/.exec(own);
+    const tmo = /maxOutputTokens:([\d.e+]+)/.exec(own);
+    templates.push({
+      providerId: tm[1], ids,
+      vision: parseVision(own), effort: parseEff(own),
+      contextWindow: tctx ? Number(tctx[1]) : null,
+      maxOutputTokens: tmo ? Number(tmo[1]) : null,
+    });
   }
 
   // 4) 引用 → optionId：找 <ref>=<expr> 定义；expr 形如 f("provider","model") 或 "字面量 id"
@@ -224,11 +231,13 @@ export function extractModels(s) {
         ? { kind: meta.effortKind, ...(meta.effortLevels ? { levels: meta.effortLevels } : {}) }
         : tmpl?.effort ?? null;
       const vision = meta.vision ?? tmpl?.vision ?? null;
+      const contextWindow = meta.contextWindow ?? tmpl?.contextWindow ?? null;
+      const maxOutputTokens = meta.maxOutputTokens ?? tmpl?.maxOutputTokens ?? null;
       out.push({
         group, name, id,
         label: labels[name] ?? meta.regLabel ?? name,
-        contextWindow: meta.contextWindow ?? null,
-        maxOutputTokens: meta.maxOutputTokens ?? null,
+        contextWindow,
+        maxOutputTokens,
         reasoning: meta.reasoning ?? null,
         effort,
         vision,

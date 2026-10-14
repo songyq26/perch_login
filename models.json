@@ -1,5 +1,5 @@
 {
-  "extractedAt": "2026-10-14T01:55:11.766Z",
+  "extractedAt": "2026-10-14T02:04:35.041Z",
   "cliVersion": "2.4.108",
   "source": "/Users/songyunqi123/.nvm/versions/node/v22.23.2/lib/node_modules/perchai-cli/dist/perch.mjs",
   "models": [
@@ -58,8 +58,8 @@
       "name": "gemini-4-argon",
       "id": "gemini-gemini-4-argon",
       "label": "Gemini 4 Argon",
-      "contextWindow": null,
-      "maxOutputTokens": null,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
       "reasoning": null,
       "effort": {
         "kind": "graded",
@@ -76,8 +76,8 @@
       "name": "claude-opus-5.5",
       "id": "snowflake-claude-opus-5-5",
       "label": "Claude Opus 5.5",
-      "contextWindow": null,
-      "maxOutputTokens": null,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
       "reasoning": null,
       "effort": {
         "kind": "graded",
@@ -139,8 +139,8 @@
       "name": "claude-sonnet-5.5",
       "id": "snowflake-claude-sonnet-5-5",
       "label": "Claude Sonnet 5.5",
-      "contextWindow": null,
-      "maxOutputTokens": null,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
       "reasoning": null,
       "effort": {
         "kind": "graded",
@@ -159,8 +159,8 @@
       "name": "claude-haiku-5.5",
       "id": "snowflake-claude-haiku-5-5",
       "label": "Claude Haiku 5.5",
-      "contextWindow": null,
-      "maxOutputTokens": null,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
       "reasoning": null,
       "effort": {
         "kind": "graded",

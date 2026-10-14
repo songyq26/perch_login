@@ -430,6 +430,8 @@ async function handleModels(res) {
     data.push({
       id, object: "model", created: 0, owned_by: "perch",
       perch_model_id: m.id,
+      context_length: m.contextWindow ?? null,
+      max_output_tokens: m.maxOutputTokens ?? null,
       supported_reasoning_levels: reasoningLevelsOf(m),
       architecture: archOf(m.vision),
     });
@@ -440,12 +442,12 @@ async function handleModels(res) {
       for (const id of await getServerDefaultIds(session)) {
         if (knownIds.has(id) || shown.has(id)) continue;
         shown.add(id);
-        data.push({ id, object: "model", created: 0, owned_by: "perch", supported_reasoning_levels: null, architecture: null });
+        data.push({ id, object: "model", created: 0, owned_by: "perch", context_length: null, max_output_tokens: null, supported_reasoning_levels: null, architecture: null });
       }
     }
   } catch {}
   for (const t of ROOST_TIERS) {
-    data.push({ id: t, object: "model", created: 0, owned_by: "perch-roost", supported_reasoning_levels: ROOST_EFFORT_LEVELS, architecture: null });
+    data.push({ id: t, object: "model", created: 0, owned_by: "perch-roost", context_length: null, max_output_tokens: null, supported_reasoning_levels: ROOST_EFFORT_LEVELS, architecture: null });
   }
   sendJson(res, 200, { object: "list", data });
 }
