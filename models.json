@@ -1,5 +1,5 @@
 {
-  "extractedAt": "2026-10-14T00:42:15.545Z",
+  "extractedAt": "2026-10-14T01:55:11.766Z",
   "cliVersion": "2.4.108",
   "source": "/Users/songyunqi123/.nvm/versions/node/v22.23.2/lib/node_modules/perchai-cli/dist/perch.mjs",
   "models": [
@@ -10,6 +10,9 @@
       "label": "Laguna S 2.1",
       "contextWindow": 262144,
       "maxOutputTokens": 32768,
+      "reasoning": true,
+      "effort": null,
+      "vision": false,
       "manualOnly": true
     },
     {
@@ -19,6 +22,16 @@
       "label": "DeepSeek V4.1 Flash (Starter)",
       "contextWindow": 1048576,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -28,6 +41,16 @@
       "label": "GLM 5.3 Flash (Starter)",
       "contextWindow": 1048576,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -36,7 +59,17 @@
       "id": "gemini-gemini-4-argon",
       "label": "Gemini 4 Argon",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "vision": true
     },
     {
       "group": "pro",
@@ -44,7 +77,19 @@
       "id": "snowflake-claude-opus-5-5",
       "label": "Claude Opus 5.5",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true
     },
     {
       "group": "pro",
@@ -53,6 +98,18 @@
       "label": "GPT-6.1 Sol",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -62,6 +119,19 @@
       "label": "GPT-6 Luna",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -70,7 +140,19 @@
       "id": "snowflake-claude-sonnet-5-5",
       "label": "Claude Sonnet 5.5",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true
     },
     {
       "group": "pro",
@@ -78,7 +160,19 @@
       "id": "snowflake-claude-haiku-5-5",
       "label": "Claude Haiku 5.5",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true
     },
     {
       "group": "pro",
@@ -87,6 +181,17 @@
       "label": "Kimi K3",
       "contextWindow": 1000000,
       "maxOutputTokens": 32768,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -96,6 +201,17 @@
       "label": "Grok 4.7",
       "contextWindow": 500000,
       "maxOutputTokens": 64000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -105,6 +221,18 @@
       "label": "Grok 4.6",
       "contextWindow": 500000,
       "maxOutputTokens": 64000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -114,6 +242,17 @@
       "label": "GLM 5.3",
       "contextWindow": 1000000,
       "maxOutputTokens": 32768,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -123,6 +262,16 @@
       "label": "GLM 5.3 Flash",
       "contextWindow": 1048576,
       "maxOutputTokens": 1048576,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -132,6 +281,16 @@
       "label": "DeepSeek V4.1 Flash",
       "contextWindow": 1000000,
       "maxOutputTokens": 393216,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -141,6 +300,11 @@
       "label": "Qwen 3.8 Flash",
       "contextWindow": 1000000,
       "maxOutputTokens": 131072,
+      "reasoning": true,
+      "effort": {
+        "kind": "binary"
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -150,6 +314,16 @@
       "label": "Qwen 3.8 Max 0902",
       "contextWindow": 1000000,
       "maxOutputTokens": 131072,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -159,6 +333,17 @@
       "label": "Qwen 3.8 27B",
       "contextWindow": 262144,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "xhigh"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -167,7 +352,10 @@
       "id": "wandb-minimax-m3",
       "label": "MiniMax M3",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": null,
+      "vision": null
     },
     {
       "group": "pro",
@@ -176,6 +364,9 @@
       "label": "Nemotron Ultra",
       "contextWindow": 262000,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": null,
+      "vision": false,
       "manualOnly": true
     },
     {
@@ -185,6 +376,9 @@
       "label": "Nemotron 3.5 Lightning",
       "contextWindow": 262000,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": null,
+      "vision": false,
       "manualOnly": true
     },
     {
@@ -193,7 +387,10 @@
       "id": "wandb-deepseek-ai-deepseek-v4-pro",
       "label": "DeepSeek V4 Pro 0813",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": null,
+      "vision": null
     },
     {
       "group": "pro",
@@ -202,6 +399,16 @@
       "label": "DeepSeek V4 Flash 0731",
       "contextWindow": 262144,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "xhigh"
+        ]
+      },
+      "vision": false,
       "manualOnly": true
     },
     {
@@ -211,6 +418,9 @@
       "label": "Qwen 3.7 Plus",
       "contextWindow": 262144,
       "maxOutputTokens": 32000,
+      "reasoning": false,
+      "effort": null,
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -219,7 +429,10 @@
       "id": "wandb-kimi-k2-7-code",
       "label": "Kimi K2.7 Code",
       "contextWindow": null,
-      "maxOutputTokens": null
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": null,
+      "vision": null
     },
     {
       "group": "pro",
@@ -228,6 +441,9 @@
       "label": "GLM 5.2",
       "contextWindow": 203000,
       "maxOutputTokens": null,
+      "reasoning": true,
+      "effort": null,
+      "vision": false,
       "manualOnly": true
     },
     {
@@ -237,6 +453,19 @@
       "label": "GPT-6 Sol",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -246,6 +475,19 @@
       "label": "GPT-5.6 Sol",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -255,6 +497,19 @@
       "label": "GPT-5.6 Terra",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     },
     {
@@ -264,6 +519,19 @@
       "label": "GPT-5.6 Luna",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
+      "reasoning": true,
+      "effort": {
+        "kind": "graded",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "vision": true,
       "manualOnly": true
     }
   ]

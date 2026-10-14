@@ -111,9 +111,31 @@ function normalizeMessages(messages) {
   return messages.map((m) => {
     const msg = { ...m };
     if (Array.isArray(msg.content)) {
-      msg.content = msg.content
-        .map((p) => (typeof p === "string" ? p : p?.type === "text" ? p.text ?? "" : p?.type === "image_url" ? "[image]" : ""))
-        .join("\n");
+      const parts = [];
+      let hasImage = false;
+      for (const p of msg.content) {
+        if (typeof p === "string") {
+          parts.push({ type: "text", text: p });
+          continue;
+        }
+        if (p?.type === "text" && typeof p.text === "string") {
+          parts.push({ type: "text", text: p.text });
+          continue;
+        }
+        // 图片按官方线上格式原样透传（{type:"image_url", image_url:{url: dataUrl|http(s)}}
+        if (p?.type === "image_url" && typeof p.image_url?.url === "string") {
+          const url = p.image_url.url;
+          if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(url) || /^https?:\/\//i.test(url)) {
+            parts.push({ type: "image_url", image_url: { url } });
+            hasImage = true;
+          } else {
+            parts.push({ type: "text", text: "[image: 不支持的 URL 格式，已省略]" });
+          }
+          continue;
+        }
+        parts.push({ type: "text", text: `[${p?.type ?? "unknown"} 内容已省略]` });
+      }
+      msg.content = hasImage ? parts : parts.map((x) => x.text).join("\n");
     }
     if (msg.role === "assistant" && msg.tool_calls && (msg.content == null)) msg.content = "";
     if (msg.role !== "assistant" && msg.tool_calls) delete msg.tool_calls;
@@ -234,17 +256,29 @@ async function handleChatCompletions(req, res) {
   const includeUsage = body.stream_options?.include_usage === true;
   const requestedModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : "perch";
   const isAuto = /^(perch|perch-default|default)$/i.test(requestedModel);
-  // 支持 "档位@强度" 写法（如 pro@max / pro@off），强度默认 high
+  // 推理强度（effort）解析，优先级：model 里的 "@强度" > 请求体 reasoning_effort / reasoning.effort > 官方默认 high
   let tierPart = requestedModel;
-  let effortLevel = "high";
+  let effortSuffix = null;
   if (!isAuto && requestedModel.includes("@")) {
     const at = requestedModel.indexOf("@");
     tierPart = requestedModel.slice(0, at);
-    effortLevel = requestedModel.slice(at + 1);
-    if (!ROOST_EFFORT_LEVELS.includes(effortLevel)) {
-      throw httpError(400, `未知推理强度 "${effortLevel}"（可选：${ROOST_EFFORT_LEVELS.join(" / ")}），写法如 pro@max`);
+    effortSuffix = requestedModel.slice(at + 1);
+    if (!ROOST_EFFORT_LEVELS.includes(effortSuffix)) {
+      throw httpError(400, `未知推理强度 "${effortSuffix}"（可选：${ROOST_EFFORT_LEVELS.join(" / ")}），写法如 pro@max`);
     }
   }
+  const rawEffort = typeof body.reasoning_effort === "string" ? body.reasoning_effort
+    : typeof body.reasoning?.effort === "string" ? body.reasoning.effort
+    : null;
+  let effortBody = null;
+  if (rawEffort != null) {
+    const mapped = { none: "off", minimal: "low" }[String(rawEffort).toLowerCase()] ?? String(rawEffort).toLowerCase();
+    if (!ROOST_EFFORT_LEVELS.includes(mapped)) {
+      throw httpError(400, `不支持的 reasoning_effort "${rawEffort}"（可选：${ROOST_EFFORT_LEVELS.join(" / ")}；none→off、minimal→low 自动映射）`);
+    }
+    effortBody = mapped;
+  }
+  const effortRequested = effortSuffix ?? effortBody;
   const tier = isAuto ? null : resolveTier(tierPart);
   let pin = isAuto || tier ? null : await resolveModel(requestedModel);
   let pinFromServerDefaults = false;
@@ -293,7 +327,7 @@ async function handleChatCompletions(req, res) {
     ...(pin
       ? { preferredModelId: pin.id, manualModelOptionId: pin.id }
       : tier
-        ? roostFields(tier, effortLevel)
+        ? roostFields(tier, effortRequested ?? "high")
         : { preferredModelId: null }),
     avoidModelIds: [],
     attribution: {
@@ -302,6 +336,13 @@ async function handleChatCompletions(req, res) {
     },
     clientSurface: "cli",
   };
+
+  const selDesc = pin ? `pin=${pin.id}${pinFromServerDefaults ? "(server-default)" : ""}` : tier ? `tier=${tier}` : "auto";
+  const effortIgnored = Boolean(effortRequested) && !tier;
+  const effortDesc = effortRequested ? ` effort=${effortRequested}${effortIgnored ? "(ignored)" : ""}` : "";
+  if (effortIgnored) {
+    console.warn(`[warn] reasoning_effort=${effortRequested} 已忽略：官方语义下 effort 只随 Roost 档位生效，pin/自动路由请求不采纳（实测确认）；要控制推理强度请用档位，如 "pro" 或 "pro@${effortRequested}"`);
+  }
 
   const ac = new AbortController();
   res.on("close", () => {
@@ -330,7 +371,7 @@ async function handleChatCompletions(req, res) {
       choices: [{ index: 0, message, finish_reason: finishReasonOf(doneEv, toolCalls) }],
       usage: toOpenAIUsage(doneEv?.usage),
     });
-    console.log(`[${new Date().toISOString()}] ${modelLabel} msgs=${messages.length} tools=${tools?.length ?? 0} ${pin ? `pin=${pin.id}${pinFromServerDefaults ? "(server-default)" : ""}` : tier ? `tier=${tier}` : "auto"} → 200 (${Date.now() - started}ms, ${text.length} chars, ${toolCalls.length} tool calls)`);
+    console.log(`[${new Date().toISOString()}] ${modelLabel} msgs=${messages.length} tools=${tools?.length ?? 0} ${selDesc}${effortDesc} → 200 (${Date.now() - started}ms, ${text.length} chars, ${toolCalls.length} tool calls)`);
     return;
   }
 
@@ -361,11 +402,22 @@ async function handleChatCompletions(req, res) {
   }
   res.write("data: [DONE]\n\n");
   res.end();
-  console.log(`[${new Date().toISOString()}] ${modelLabel} msgs=${messages.length} tools=${tools?.length ?? 0} ${pin ? `pin=${pin.id}${pinFromServerDefaults ? "(server-default)" : ""}` : tier ? `tier=${tier}` : "auto"} stream → 200 (${Date.now() - started}ms, ${text.length} chars, ${toolCalls.length} tool calls)`);
+  console.log(`[${new Date().toISOString()}] ${modelLabel} msgs=${messages.length} tools=${tools?.length ?? 0} ${selDesc}${effortDesc} stream → 200 (${Date.now() - started}ms, ${text.length} chars, ${toolCalls.length} tool calls)`);
 }
 
 async function handleModels(res) {
-  const data = [{ id: "perch", object: "model", created: 0, owned_by: "perch", perch_model_id: null }];
+  // 每个模型的推理能力（供客户端生成模型目录用）：graded → 其 levels；binary → off/on；未知 → null
+  const reasoningLevelsOf = (m) => {
+    if (m.reasoning === false) return [];
+    if (m.effort?.kind === "graded") return m.effort.levels ?? [];
+    if (m.effort?.kind === "binary") return ["off", "on"];
+    if (m.effort?.kind === "none") return [];
+    return null; // 未知（注册项为模板生成且未覆盖到）
+  };
+  // OpenRouter 风格的模态信息；vision 未知 → null
+  const archOf = (vision) =>
+    vision == null ? null : { input_modalities: ["text", ...(vision ? ["image"] : [])], output_modalities: ["text"] };
+  const data = [{ id: "perch", object: "model", created: 0, owned_by: "perch", perch_model_id: null, supported_reasoning_levels: ROOST_EFFORT_LEVELS, architecture: null }];
   const shown = new Set(["perch"]);
   const knownIds = new Set();
   for (const m of await loadModels()) {
@@ -375,7 +427,12 @@ async function handleModels(res) {
     let id = m.label || m.id;
     if (shown.has(id)) id = m.id;
     shown.add(id);
-    data.push({ id, object: "model", created: 0, owned_by: "perch", perch_model_id: m.id });
+    data.push({
+      id, object: "model", created: 0, owned_by: "perch",
+      perch_model_id: m.id,
+      supported_reasoning_levels: reasoningLevelsOf(m),
+      architecture: archOf(m.vision),
+    });
   }
   try {
     const session = await loadSession();
@@ -383,12 +440,12 @@ async function handleModels(res) {
       for (const id of await getServerDefaultIds(session)) {
         if (knownIds.has(id) || shown.has(id)) continue;
         shown.add(id);
-        data.push({ id, object: "model", created: 0, owned_by: "perch" });
+        data.push({ id, object: "model", created: 0, owned_by: "perch", supported_reasoning_levels: null, architecture: null });
       }
     }
   } catch {}
   for (const t of ROOST_TIERS) {
-    data.push({ id: t, object: "model", created: 0, owned_by: "perch-roost" });
+    data.push({ id: t, object: "model", created: 0, owned_by: "perch-roost", supported_reasoning_levels: ROOST_EFFORT_LEVELS, architecture: null });
   }
   sendJson(res, 200, { object: "list", data });
 }

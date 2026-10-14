@@ -109,7 +109,7 @@ const makeId = (providerId, modelId) =>
 
 const escapeRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-function extractModels(s) {
+export function extractModels(s) {
   // 1) 显示名表（名字 → 界面显示名）
   const labelAnchor = s.indexOf('"laguna-s":"Laguna S 2.1"');
   if (labelAnchor === -1) throw new Error("未找到显示名表锚点（CLI 结构可能又变了）");
@@ -133,21 +133,61 @@ function extractModels(s) {
 
   // 3) 注册项元数据（不依赖构建函数名）
   const registry = {};
-  for (const m of s.matchAll(/providerId:"([^"]+)",modelId:"([^"]+)"/g)) {
+  const parseEff = (own) => {
+    const eff = /effortCapability:\{kind:"(\w+)"(?:,levels:\[([^\]]*)\])?/.exec(own);
+    return eff ? { kind: eff[1], levels: eff[2] ? [...eff[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : null } : null;
+  };
+  const parseVision = (own) => {
+    const mod = /modality:"(\w+)"/.exec(own)?.[1] ?? null;
+    const caps = /capabilities:\[([^\]]*)\]/.exec(own)?.[1] ?? "";
+    if (mod === "vision" || caps.includes('"vision"')) return true;
+    if (mod) return false;
+    return null;
+  };
+  for (const m of s.matchAll(/providerId:"([^"]+)",modelId:([A-Za-z_$][\w$]*|"[^"]+")/g)) {
+    if (!m[2].startsWith('"')) continue;
+    const literalModelId = m[2].slice(1, -1);
+    const id = makeId(m[1], literalModelId);
     const own = balanced(s, s.lastIndexOf("{", m.index)) ?? "";
-    const id = makeId(m[1], m[2]);
     const ctx = /contextWindow:([\d.e+]+)/.exec(own);
     const maxOut = /maxOutputTokens:([\d.e+]+)/.exec(own);
     const label = /label:"([^"]*)"/.exec(own);
+    const reasoning = /reasoningSupport:"(\w+)"/.exec(own);
+    const eff = parseEff(own);
+    const vision = parseVision(own);
     const entry = {
+      providerId: m[1],
+      modelId: literalModelId,
       contextWindow: ctx ? Number(ctx[1]) : null,
       maxOutputTokens: maxOut ? Number(maxOut[1]) : null,
       regLabel: label?.[1] ?? null,
+      reasoning: reasoning ? reasoning[1] !== "false" : null,
+      effortKind: eff?.kind ?? null,
+      effortLevels: eff?.levels ?? null,
+      vision,
       internal: /userFacing:!1/.test(own),
       manualOnly: /manualOnly:!0/.test(own),
     };
     const prev = registry[id];
-    if (!prev || (!prev.contextWindow && entry.contextWindow)) registry[id] = entry;
+    const better =
+      !prev ||
+      (prev.contextWindow == null && entry.contextWindow != null) ||
+      (prev.effortKind == null && entry.effortKind != null) ||
+      (prev.vision == null && entry.vision != null);
+    if (better) registry[id] = entry;
+  }
+
+  // 3b) 模板关联：[{modelId:"a",…},{modelId:"b",…}].map(({modelId:e,…})=>builder({providerId:"P",modelId:e,…}))
+  //     用于 modelId 由变量批量生成的注册项（如 Claude/gemini 家族）
+  const templates = [];
+  for (const m of s.matchAll(/\[\s*((?:\{[^{}]*modelId:"[^"]+"[^{}]*\}\s*,?\s*)+)\]\.map\(/g)) {
+    const ids = new Set([...m[1].matchAll(/modelId:"([^"]+)"/g)].map((x) => x[1]));
+    const afterStart = m.index + m[0].length;
+    const tm = /providerId:"([^"]+)",modelId:[A-Za-z_$][\w$]*/.exec(s.slice(afterStart, afterStart + 1200));
+    if (!tm) continue;
+    const open = s.lastIndexOf("{", afterStart + tm.index);
+    const own = balanced(s, open) ?? "";
+    templates.push({ providerId: tm[1], ids, vision: parseVision(own), effort: parseEff(own) });
   }
 
   // 4) 引用 → optionId：找 <ref>=<expr> 定义；expr 形如 f("provider","model") 或 "字面量 id"
@@ -177,11 +217,21 @@ function extractModels(s) {
       if (seen.has(id)) continue;
       seen.add(id);
       const meta = registry[id] ?? {};
+      const tmpl = meta.providerId && meta.modelId
+        ? templates.find((t) => t.providerId === meta.providerId && t.ids.has(meta.modelId))
+        : null;
+      const effort = meta.effortKind
+        ? { kind: meta.effortKind, ...(meta.effortLevels ? { levels: meta.effortLevels } : {}) }
+        : tmpl?.effort ?? null;
+      const vision = meta.vision ?? tmpl?.vision ?? null;
       out.push({
         group, name, id,
         label: labels[name] ?? meta.regLabel ?? name,
         contextWindow: meta.contextWindow ?? null,
         maxOutputTokens: meta.maxOutputTokens ?? null,
+        reasoning: meta.reasoning ?? null,
+        effort,
+        vision,
         ...(meta.internal ? { internal: true } : {}),
         ...(meta.manualOnly ? { manualOnly: true } : {}),
       });
@@ -194,6 +244,7 @@ function extractModels(s) {
       labelAnchor: labelAnchor >= 0,
       menuSizes: menus.map(([g, m]) => `${g}:${Object.keys(m).length} 项`),
       registryCount: Object.keys(registry).length,
+      templates: templates.map((t) => `${t.providerId}:${t.ids.size}`),
     },
   };
 }
