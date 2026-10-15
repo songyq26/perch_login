@@ -19,6 +19,9 @@
 //   · pin / 自动路由请求：默认也随请求转发（实测服务端会采纳；官方 CLI 不发送
 //     这一组合，属本网关的扩展能力）；PERCH_FORWARD_PIN_EFFORT=0 可关闭
 //   · 每个请求打印逐行 trace（收到→解析→effort→外发→完成），便于排查
+//
+// 用量：GET /usage 返回本进程记录的每次请求的用量流水（含 runId，可对账）；
+// GET /usage/upstream 用 runId 调服务端 /api/perch-terminal/usage 拿权威用量。
 
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -376,6 +379,20 @@ async function handleChatCompletions(req, res) {
         : ` → ✅ 随${pin ? "pin" : "自动路由"}转发（roostReasoning=${effortRequested !== "off"}, level=${effortRequested}）`
     : tier ? " → 未指定，档位默认 high" : ""}`);
   console.log(`[${ts()} #${reqId}] 外发: runId=${runId} ${JSON.stringify({ preferredModelId: perchBody.preferredModelId, manualModelOptionId: perchBody.manualModelOptionId, roostModelChoice: perchBody.roostModelChoice, roostReasoning: perchBody.roostReasoning, effort: perchBody.effort })}`);
+  const usageEntry = (doneEv, isStream) => ({
+    ts: new Date().toISOString(),
+    runId,
+    requested: modelLabel,
+    actual: doneEv?.model ?? null,
+    inputTokens: doneEv?.usage?.inputTokens ?? null,
+    outputTokens: doneEv?.usage?.outputTokens ?? null,
+    cacheReadInputTokens: doneEv?.usage?.cacheReadInputTokens ?? null,
+    totalTokens: doneEv?.usage?.totalTokens ?? null,
+    ms: Date.now() - started,
+    stream: isStream,
+    modelSource: selDesc,
+    effort: effortRequested ?? null,
+  });
 
   const ac = new AbortController();
   res.on("close", () => {
@@ -404,6 +421,7 @@ async function handleChatCompletions(req, res) {
       choices: [{ index: 0, message, finish_reason: finishReasonOf(doneEv, toolCalls) }],
       usage: toOpenAIUsage(doneEv?.usage),
     });
+    recordUsage(usageEntry(doneEv, false));
     console.log(`[${ts()} #${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | tokens 输入${doneEv?.usage?.inputTokens ?? "?"}/输出${doneEv?.usage?.outputTokens ?? "?"}/总${doneEv?.usage?.totalTokens ?? "?"} | 工具 ${toolCalls.length}`);
     return;
   }
@@ -435,6 +453,7 @@ async function handleChatCompletions(req, res) {
   }
   res.write("data: [DONE]\n\n");
   res.end();
+  recordUsage(usageEntry(doneEv, true));
   console.log(`[${ts()} #${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | tokens 输入${doneEv?.usage?.inputTokens ?? "?"}/输出${doneEv?.usage?.outputTokens ?? "?"}/总${doneEv?.usage?.totalTokens ?? "?"} | 工具 ${toolCalls.length}`);
 }
 
@@ -485,6 +504,64 @@ async function handleModels(res) {
   sendJson(res, 200, { object: "list", data });
 }
 
+// ---------- 用量统计（GET /usage 本地流水；GET /usage/upstream 查服务端权威用量） ----------
+const usageJournal = [];
+const USAGE_JOURNAL_MAX = 500;
+
+function recordUsage(entry) {
+  usageJournal.push(entry);
+  if (usageJournal.length > USAGE_JOURNAL_MAX) usageJournal.splice(0, usageJournal.length - USAGE_JOURNAL_MAX);
+}
+
+function summarizeUsage(entries) {
+  const totals = { calls: entries.length, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, durationMs: 0 };
+  const byModel = {};
+  for (const e of entries) {
+    const i = e.inputTokens ?? 0;
+    const o = e.outputTokens ?? 0;
+    const c = e.cacheReadInputTokens ?? 0;
+    const t = e.totalTokens ?? 0;
+    totals.promptTokens += i; totals.completionTokens += o; totals.cachedTokens += c; totals.totalTokens += t;
+    totals.durationMs += e.ms ?? 0;
+    const key = e.actual ?? e.requested ?? "unknown";
+    const m = byModel[key] ?? (byModel[key] = { calls: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0 });
+    m.calls++; m.promptTokens += i; m.completionTokens += o; m.cachedTokens += c; m.totalTokens += t;
+  }
+  return { totals, byModel };
+}
+
+function handleUsage(res, url) {
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50) || 50, 1), USAGE_JOURNAL_MAX);
+  const { totals, byModel } = summarizeUsage(usageJournal);
+  sendJson(res, 200, {
+    object: "usage.summary",
+    generatedAt: new Date().toISOString(),
+    totals,
+    byModel,
+    recent: usageJournal.slice(-limit),
+  });
+}
+
+async function handleUsageUpstream(res, url) {
+  let runIds = String(url.searchParams.get("runIds") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (runIds.length === 0) runIds = [...new Set(usageJournal.map((e) => e.runId).filter(Boolean))].slice(-50);
+  if (runIds.length === 0) {
+    throw httpError(400, "没有可查询的 runId：先通过网关发几条对话（网关会记录 runId），或用 ?runIds=a,b,c 指定");
+  }
+  let session = await loadSession();
+  if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
+  session = await ensureFresh(session);
+  const r = await fetch(`${APP_URL}/api/perch-terminal/usage`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
+    body: JSON.stringify({ runIds }),
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await r.json().catch(() => null);
+  console.log(`[${ts()}] /usage/upstream: 查询 ${runIds.length} 个 runId → HTTP ${r.status}`);
+  sendJson(res, r.ok ? 200 : r.status, data ?? { ok: false, error: `上游返回非 JSON（HTTP ${r.status}）` });
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   try {
@@ -496,6 +573,12 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && (url.pathname === "/v1/models" || url.pathname === "/models")) {
       return await handleModels(res);
+    }
+    if (req.method === "GET" && (url.pathname === "/usage" || url.pathname === "/v1/usage")) {
+      return handleUsage(res, url);
+    }
+    if (req.method === "GET" && url.pathname === "/usage/upstream") {
+      return await handleUsageUpstream(res, url);
     }
     if (req.method === "POST" && (url.pathname === "/v1/chat/completions" || url.pathname === "/chat/completions")) {
       return await handleChatCompletions(req, res);
@@ -524,6 +607,7 @@ server.listen(PORT, HOST, () => {
   console.log(`Perch OpenAI 兼容网关已启动：http://${HOST}:${PORT}/v1`);
   console.log(`  POST /v1/chat/completions   对话（stream 支持 true/false）`);
   console.log(`  GET  /v1/models             可用模型列表`);
+  console.log(`  GET  /usage                本地用量流水（?limit=N）；/usage/upstream 查服务端权威用量`);
   if (apiKey) {
     console.log(`  API key 鉴权：已开启${keyInfo?.generated ? "（本次新生成）" : keyInfo?.fromFile ? "（读自 api-key.txt）" : ""}`);
     if (keyInfo?.generated) console.log(`  你的 API key（请保存）：${apiKey}`);
