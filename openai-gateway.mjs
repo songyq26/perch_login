@@ -249,8 +249,11 @@ function finishReasonOf(doneEv, toolCalls) {
   return "stop";
 }
 
+let reqSeq = 0;
+
 async function handleChatCompletions(req, res) {
   const started = Date.now();
+  const reqId = ++reqSeq;
   const body = await readJson(req);
   const stream = body.stream === true;
   const includeUsage = body.stream_options?.include_usage === true;
@@ -270,6 +273,7 @@ async function handleChatCompletions(req, res) {
   const rawEffort = typeof body.reasoning_effort === "string" ? body.reasoning_effort
     : typeof body.reasoning?.effort === "string" ? body.reasoning.effort
     : null;
+  const rawEffortSource = rawEffort == null ? null : (typeof body.reasoning_effort === "string" ? "body.reasoning_effort" : "body.reasoning.effort");
   let effortBody = null;
   if (rawEffort != null) {
     const mapped = { none: "off", minimal: "low" }[String(rawEffort).toLowerCase()] ?? String(rawEffort).toLowerCase();
@@ -279,6 +283,7 @@ async function handleChatCompletions(req, res) {
     effortBody = mapped;
   }
   const effortRequested = effortSuffix ?? effortBody;
+  console.log(`[#${reqId}] 收到: model="${requestedModel}" | effort=${effortSuffix ?? rawEffort ?? "未指定"}${effortSuffix ? "（model 后缀）" : rawEffortSource ? `（${rawEffortSource}）` : ""} | stream=${stream}`);
   const tier = isAuto ? null : resolveTier(tierPart);
   let pin = isAuto || tier ? null : await resolveModel(requestedModel);
   let pinFromServerDefaults = false;
@@ -305,6 +310,8 @@ async function handleChatCompletions(req, res) {
       throw httpError(400, `未知模型 "${requestedModel}"：用 "perch" 走服务端自动路由；或用档位 standard / standard_max / pro / pro_max（可加推理强度，如 pro@max / pro@off）；或在 GET /v1/models 里选一个可固定（pin）的模型 id（如 dashscope-deepseek-v4-1-flash / DeepSeek V4.1 Flash）`);
     }
   }
+
+  console.log(`[#${reqId}] 解析: ${isAuto ? "自动路由" : tier ? `档位=${tier}` : `pin=${pin?.id ?? "未解析"}${pinFromServerDefaults ? "（服务端默认值兜底）" : ""}`}`);
 
   const info = await getWorkspace(session, lastUserText(messages));
 
@@ -343,6 +350,8 @@ async function handleChatCompletions(req, res) {
   if (effortIgnored) {
     console.warn(`[warn] reasoning_effort=${effortRequested} 已忽略：官方语义下 effort 只随 Roost 档位生效，pin/自动路由请求不采纳（实测确认）；要控制推理强度请用档位，如 "pro" 或 "pro@${effortRequested}"`);
   }
+  console.log(`[#${reqId}] effort: 请求值=${effortRequested ?? "未指定"}${effortRequested ? (effortIgnored ? " → ❌ 忽略（非档位请求，官方语义）" : ` → ✅ 随档位发送`) : tier ? " → 未指定，档位默认 high" : ""}`);
+  console.log(`[#${reqId}] 外发: ${JSON.stringify({ preferredModelId: perchBody.preferredModelId, manualModelOptionId: perchBody.manualModelOptionId, roostModelChoice: perchBody.roostModelChoice, roostReasoning: perchBody.roostReasoning, effort: perchBody.effort })}`);
 
   const ac = new AbortController();
   res.on("close", () => {
@@ -371,7 +380,7 @@ async function handleChatCompletions(req, res) {
       choices: [{ index: 0, message, finish_reason: finishReasonOf(doneEv, toolCalls) }],
       usage: toOpenAIUsage(doneEv?.usage),
     });
-    console.log(`[${new Date().toISOString()}] ${modelLabel} msgs=${messages.length} tools=${tools?.length ?? 0} ${selDesc}${effortDesc} → 200 (${Date.now() - started}ms, ${text.length} chars, ${toolCalls.length} tool calls)`);
+    console.log(`[#${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 工具调用 ${toolCalls.length}`);
     return;
   }
 
@@ -402,7 +411,7 @@ async function handleChatCompletions(req, res) {
   }
   res.write("data: [DONE]\n\n");
   res.end();
-  console.log(`[${new Date().toISOString()}] ${modelLabel} msgs=${messages.length} tools=${tools?.length ?? 0} ${selDesc}${effortDesc} stream → 200 (${Date.now() - started}ms, ${text.length} chars, ${toolCalls.length} tool calls)`);
+  console.log(`[#${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 工具调用 ${toolCalls.length}`);
 }
 
 async function handleModels(res) {
@@ -477,6 +486,7 @@ const server = createServer(async (req, res) => {
       : e?.errorCode === "turn_ticket_unavailable" ? 502
       : e?.status ?? 500;
     const msg = e?.message ?? String(e);
+    console.warn(`[请求失败] HTTP ${status}: ${msg.slice(0, 200)}`);
     sendError(res, status, msg);
     if (/fetch failed|timed out|ECONN|ENOTFOUND/i.test(msg)) {
       console.error("上游网络不通：本机若走系统代理，请用 HTTPS_PROXY=http://127.0.0.1:7890 node --use-env-proxy openai-gateway.mjs 启动");
