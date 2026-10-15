@@ -22,12 +22,9 @@
 //
 // 用量：GET /usage 返回本进程记录的每次请求的用量流水（含 runId，可对账）；
 // GET /usage/upstream 用 runId 调服务端 /api/perch-terminal/usage 拿权威用量。
-// 余额：GET /balance 完整配额视图（plan/月用量/rolling 窗口/credit）；
-// GET /v1/usage 为 magpie 兼容的窗口形状（rate_limits: 5h/7d，USD，可选 reset_at）。
-//   magpie 只认 5h/1d/7d 三个窗口名、同名只取第一条，故默认交出 manual 那组并改名：
-//     /v1/usage           → manual 组（15/37.5 那组，路由与卡片按它权衡）
-//     /v1/usage?src=roost → Roost 组
-//     /v1/usage?src=all   → 全部四条原样（manual-* 会被 magpie 忽略，仅供展示）
+// 余额：GET /balance 完整配额视图（plan/月用量、Roost 与 manual 的 rolling 窗口、credit）；
+// GET /v1/usage 是 magpie 的余额地址：只交出 manual（手动模型）那组窗口，并改名为
+//   magpie 认得的 5h / 7d（它只认这三个名字、同名只取第一条），路由与卡片都按它权衡。
 //   magpie 侧余额地址填 http://<host>:<port>/v1/usage、key 填本网关的 API key。
 
 import { createServer } from "node:http";
@@ -651,33 +648,23 @@ async function handleBalance(res) {
 }
 
 // magpie 的窗口读取只认 5h / 1d / 7d 三个名字，同名只取第一条、limit<=0 的跳过；
-// 因此默认只交出 manual（手动模型）那组并改名为标准窗口名——它才是会被用满的那组。
-// ?src=roost 改交 Roost 那组；?src=all 原样交出全部（manual-* 会被 magpie 忽略，仅供展示）。
-async function handleMagpieUsage(res, url) {
+// 所以这里只交出 manual（手动模型）那组并改名为标准窗口名——它才是会被用满的那组。
+async function handleMagpieUsage(res) {
   let session = await loadSession();
   if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
   session = await ensureFresh(session);
   const balance = buildBalance(await fetchAccount(session));
-  const src = (url.searchParams.get("src") ?? "manual").toLowerCase();
-  const usable = balance.windows.filter((w) => asNum(w.capUsd) != null && w.capUsd > 0);
-  const kind = src === "roost" ? "roost" : "manual";
-  let picked = src === "all" ? usable : usable.filter((w) => w.kind === kind);
-  if (src !== "all" && picked.length === 0) picked = usable.filter((w) => w.kind !== kind);
-  const rate_limits = [];
-  const seen = new Set();
-  for (const w of picked) {
-    const name = src === "all" && w.kind === "manual" ? `manual-${w.id}` : w.id;
-    if (seen.has(name)) continue;
-    seen.add(name);
-    rate_limits.push({
-      window: name,
+  const rate_limits = balance.windows
+    .filter((w) => w.kind === "manual" && asNum(w.capUsd) != null && w.capUsd > 0)
+    .map((w) => ({
+      window: w.id,
       limit: w.capUsd,
       used: w.usedUsd,
       ...(w.nextFreedAt ? { reset_at: w.nextFreedAt } : {}),
-    });
-  }
+    }));
+  if (rate_limits.length === 0) console.warn(`[${ts()}] /v1/usage: 上游没有可用的 manual 窗口（rolling 可能未启用），返回空 rate_limits`);
   const out = { ...(balance.balanceUsd != null ? { remaining: balance.balanceUsd } : {}), rate_limits };
-  console.log(`[${ts()}] /v1/usage(magpie, src=${src}): ${JSON.stringify(out)}`);
+  console.log(`[${ts()}] /v1/usage(magpie): ${JSON.stringify(out)}`);
   sendJson(res, 200, out);
 }
 
@@ -700,7 +687,7 @@ const server = createServer(async (req, res) => {
       return await handleUsageUpstream(res, url);
     }
     if (req.method === "GET" && url.pathname === "/v1/usage") {
-      return await handleMagpieUsage(res, url);
+      return await handleMagpieUsage(res);
     }
     if (req.method === "GET" && url.pathname === "/balance") {
       return await handleBalance(res);
@@ -733,7 +720,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  POST /v1/chat/completions   对话（stream 支持 true/false）`);
   console.log(`  GET  /v1/models             可用模型列表`);
   console.log(`  GET  /usage                本地用量流水（?limit=N）；/usage/upstream 查服务端权威用量`);
-  console.log(`  GET  /v1/usage             magpie 余额窗口：默认交 manual 组（改名 5h/7d）；?src=roost 换 Roost 组，?src=all 全部原样`);
+  console.log(`  GET  /v1/usage             magpie 余额窗口：只含 manual 组（改名 5h/7d）；GET /balance 为完整配额视图`);
   console.log(`                             （magpie 余额地址就填 http://<host>:${PORT}/v1/usage；GET /balance 为完整配额视图）`);
   if (apiKey) {
     console.log(`  API key 鉴权：已开启${keyInfo?.generated ? "（本次新生成）" : keyInfo?.fromFile ? "（读自 api-key.txt）" : ""}`);
