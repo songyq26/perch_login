@@ -13,6 +13,12 @@
 // 与 OpenAI 协议的已知差异（上游决定）：工具调用参数不做增量流式（在
 // tool_use_end/done 后整段下发）；reasoning_delta 映射为 delta.reasoning_content
 // （非标准扩展字段）；stream_restart 无法在 OpenAI 协议里表达回滚。
+//
+// 推理强度（reasoning_effort / reasoning.effort，none→off、minimal→low 自动映射）：
+//   · 档位请求（model=pro 等）：随 Roost 三件套发送（官方行为）
+//   · pin / 自动路由请求：默认也随请求转发（实测服务端会采纳；官方 CLI 不发送
+//     这一组合，属本网关的扩展能力）；PERCH_FORWARD_PIN_EFFORT=0 可关闭
+//   · 每个请求打印逐行 trace（收到→解析→effort→外发→完成），便于排查
 
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -29,6 +35,10 @@ const flagValue = (name) => {
 const PORT = Number(process.env.PORT ?? flagValue("--port") ?? 8787);
 const HOST = flagValue("--host") ?? process.env.HOST ?? "127.0.0.1";
 const MAX_TOKENS_CAP = 32000;
+// pin/自动路由的 effort 转发：默认开启（实测服务端会采纳这个组合；官方 CLI 不发送它）
+// 关闭方式：PERCH_FORWARD_PIN_EFFORT=0
+const FORWARD_PIN_EFFORT = !["0", "false", "off"].includes(String(process.env.PERCH_FORWARD_PIN_EFFORT ?? "").trim().toLowerCase());
+const ts = () => new Date().toISOString().slice(11, 23);
 const CTX_TTL_MS = 15 * 60 * 1000;
 const API_KEY_FILE = path.join(import.meta.dirname, "api-key.txt");
 
@@ -221,6 +231,7 @@ async function getServerDefaultIds(session) {
 
 async function consumeUpstream(up, onDelta) {
   let text = "";
+  let reasoning = "";
   let toolCalls = [];
   let doneEv = null;
   let streamError = null;
@@ -229,6 +240,7 @@ async function consumeUpstream(up, onDelta) {
       text += ev.text;
       onDelta?.({ content: ev.text });
     } else if (ev.type === "reasoning_delta" && typeof ev.text === "string") {
+      reasoning += ev.text;
       onDelta?.({ reasoning_content: ev.text });
     } else if ((ev.type === "tool_call_delta" || ev.type === "tool_use_end") && Array.isArray(ev.toolCalls)) {
       toolCalls = ev.toolCalls;
@@ -240,7 +252,7 @@ async function consumeUpstream(up, onDelta) {
   });
   const finalRaw = doneEv?.toolCalls?.length ? doneEv.toolCalls : toolCalls;
   const sealed = (finalRaw ?? []).filter((tc) => tc?.sealed !== false);
-  return { text, toolCalls: sealed, doneEv, streamError };
+  return { text, reasoning, toolCalls: sealed, doneEv, streamError };
 }
 
 function finishReasonOf(doneEv, toolCalls) {
@@ -283,7 +295,7 @@ async function handleChatCompletions(req, res) {
     effortBody = mapped;
   }
   const effortRequested = effortSuffix ?? effortBody;
-  console.log(`[#${reqId}] 收到: model="${requestedModel}" | effort=${effortSuffix ?? rawEffort ?? "未指定"}${effortSuffix ? "（model 后缀）" : rawEffortSource ? `（${rawEffortSource}）` : ""} | stream=${stream}`);
+  console.log(`[${ts()} #${reqId}] 收到: model="${requestedModel}" | effort=${effortSuffix ?? rawEffort ?? "未指定"}${effortSuffix ? "（model 后缀）" : rawEffortSource ? `（${rawEffortSource}）` : ""} | stream=${stream} | 消息=${Array.isArray(body.messages) ? body.messages.length : 0} | tools=${Array.isArray(body.tools) ? body.tools.length : 0} | max_tokens=${body.max_tokens ?? body.max_completion_tokens ?? "默认"} | temperature=${body.temperature ?? "默认"}`);
   const tier = isAuto ? null : resolveTier(tierPart);
   let pin = isAuto || tier ? null : await resolveModel(requestedModel);
   let pinFromServerDefaults = false;
@@ -311,7 +323,7 @@ async function handleChatCompletions(req, res) {
     }
   }
 
-  console.log(`[#${reqId}] 解析: ${isAuto ? "自动路由" : tier ? `档位=${tier}` : `pin=${pin?.id ?? "未解析"}${pinFromServerDefaults ? "（服务端默认值兜底）" : ""}`}`);
+  console.log(`[${ts()} #${reqId}] 解析: ${isAuto ? "自动路由" : tier ? `档位=${tier}` : `pin=${pin?.id ?? "未解析"}${pin ? `（"${pin.label}"）` : ""}${pinFromServerDefaults ? "（服务端默认值兜底）" : ""}`}`);
 
   const info = await getWorkspace(session, lastUserText(messages));
 
@@ -332,10 +344,16 @@ async function handleChatCompletions(req, res) {
     lane: "chat",
     strictManual: false,
     ...(pin
-      ? { preferredModelId: pin.id, manualModelOptionId: pin.id }
+      ? {
+          preferredModelId: pin.id, manualModelOptionId: pin.id,
+          ...(FORWARD_PIN_EFFORT && effortRequested ? { roostReasoning: effortRequested !== "off", effort: { level: effortRequested } } : {}),
+        }
       : tier
         ? roostFields(tier, effortRequested ?? "high")
-        : { preferredModelId: null }),
+        : {
+            preferredModelId: null,
+            ...(FORWARD_PIN_EFFORT && effortRequested ? { roostReasoning: effortRequested !== "off", effort: { level: effortRequested } } : {}),
+          }),
     avoidModelIds: [],
     attribution: {
       userId: info.userId, workspaceId: info.workspaceId, runId,
@@ -345,13 +363,19 @@ async function handleChatCompletions(req, res) {
   };
 
   const selDesc = pin ? `pin=${pin.id}${pinFromServerDefaults ? "(server-default)" : ""}` : tier ? `tier=${tier}` : "auto";
-  const effortIgnored = Boolean(effortRequested) && !tier;
+  const effortIgnored = Boolean(effortRequested) && !tier && !FORWARD_PIN_EFFORT;
   const effortDesc = effortRequested ? ` effort=${effortRequested}${effortIgnored ? "(ignored)" : ""}` : "";
   if (effortIgnored) {
-    console.warn(`[warn] reasoning_effort=${effortRequested} 已忽略：官方语义下 effort 只随 Roost 档位生效，pin/自动路由请求不采纳（实测确认）；要控制推理强度请用档位，如 "pro" 或 "pro@${effortRequested}"`);
+    console.warn(`[warn] reasoning_effort=${effortRequested} 已忽略：PERCH_FORWARD_PIN_EFFORT=0 且非档位请求；要控制推理强度请用档位（如 "pro@${effortRequested}"）或去掉该环境变量（默认会随 pin/自动路由转发）`);
   }
-  console.log(`[#${reqId}] effort: 请求值=${effortRequested ?? "未指定"}${effortRequested ? (effortIgnored ? " → ❌ 忽略（非档位请求，官方语义）" : ` → ✅ 随档位发送`) : tier ? " → 未指定，档位默认 high" : ""}`);
-  console.log(`[#${reqId}] 外发: ${JSON.stringify({ preferredModelId: perchBody.preferredModelId, manualModelOptionId: perchBody.manualModelOptionId, roostModelChoice: perchBody.roostModelChoice, roostReasoning: perchBody.roostReasoning, effort: perchBody.effort })}`);
+  console.log(`[${ts()} #${reqId}] effort: 请求值=${effortRequested ?? "未指定"}${effortRequested
+    ? tier
+      ? " → ✅ 随档位发送"
+      : effortIgnored
+        ? " → ❌ 已忽略（PERCH_FORWARD_PIN_EFFORT=0，非档位不转发）"
+        : ` → ✅ 随${pin ? "pin" : "自动路由"}转发（roostReasoning=${effortRequested !== "off"}, level=${effortRequested}）`
+    : tier ? " → 未指定，档位默认 high" : ""}`);
+  console.log(`[${ts()} #${reqId}] 外发: runId=${runId} ${JSON.stringify({ preferredModelId: perchBody.preferredModelId, manualModelOptionId: perchBody.manualModelOptionId, roostModelChoice: perchBody.roostModelChoice, roostReasoning: perchBody.roostReasoning, effort: perchBody.effort })}`);
 
   const ac = new AbortController();
   res.on("close", () => {
@@ -369,7 +393,7 @@ async function handleChatCompletions(req, res) {
   const created = Math.floor(Date.now() / 1000);
 
   if (!stream) {
-    const { text, toolCalls, doneEv, streamError } = await consumeUpstream(up);
+    const { text, reasoning, toolCalls, doneEv, streamError } = await consumeUpstream(up);
     if (streamError) throw httpError(502, `上游流错误：${streamError}`);
     if (doneEv?.ok === false) throw httpError(502, `上游失败：${doneEv.error ?? doneEv.errorCode ?? "unknown"}`);
     const message = { role: "assistant", content: text || null };
@@ -380,7 +404,7 @@ async function handleChatCompletions(req, res) {
       choices: [{ index: 0, message, finish_reason: finishReasonOf(doneEv, toolCalls) }],
       usage: toOpenAIUsage(doneEv?.usage),
     });
-    console.log(`[#${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 工具调用 ${toolCalls.length}`);
+    console.log(`[${ts()} #${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | tokens 输入${doneEv?.usage?.inputTokens ?? "?"}/输出${doneEv?.usage?.outputTokens ?? "?"}/总${doneEv?.usage?.totalTokens ?? "?"} | 工具 ${toolCalls.length}`);
     return;
   }
 
@@ -396,7 +420,7 @@ async function handleChatCompletions(req, res) {
   });
 
   chunk({ role: "assistant" });
-  const { text, toolCalls, doneEv, streamError } = await consumeUpstream(up, (d) => chunk(d));
+  const { text, reasoning, toolCalls, doneEv, streamError } = await consumeUpstream(up, (d) => chunk(d));
 
   if (streamError) {
     send({ error: { message: streamError, type: "upstream_error" } });
@@ -411,7 +435,7 @@ async function handleChatCompletions(req, res) {
   }
   res.write("data: [DONE]\n\n");
   res.end();
-  console.log(`[#${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 工具调用 ${toolCalls.length}`);
+  console.log(`[${ts()} #${reqId}] 完成: 实际模型=${doneEv?.model ?? "?"} | 用时=${Date.now() - started}ms | ${selDesc}${effortDesc} | 输出 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | tokens 输入${doneEv?.usage?.inputTokens ?? "?"}/输出${doneEv?.usage?.outputTokens ?? "?"}/总${doneEv?.usage?.totalTokens ?? "?"} | 工具 ${toolCalls.length}`);
 }
 
 async function handleModels(res) {
@@ -506,6 +530,7 @@ server.listen(PORT, HOST, () => {
   } else {
     console.log(`  API key 鉴权：未开启（本地端口谁都能访问；用 ./run.sh gateway --key auto 生成并启用）`);
   }
+  console.log(`  pin/自动路由 effort 转发：${FORWARD_PIN_EFFORT ? "已开启（默认；PERCH_FORWARD_PIN_EFFORT=0 可关闭）" : "已关闭（仅档位请求携带 effort）"}`);
   const isLoopback = HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1";
   if (!isLoopback) {
     console.warn("  ⚠️ 监听在非本机地址（对外提供服务）：");
