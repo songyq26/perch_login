@@ -22,6 +22,9 @@
 //
 // 用量：GET /usage 返回本进程记录的每次请求的用量流水（含 runId，可对账）；
 // GET /usage/upstream 用 runId 调服务端 /api/perch-terminal/usage 拿权威用量。
+// 余额：GET /balance 完整配额视图（plan/月用量/rolling 窗口/credit）；
+// GET /v1/usage 为 magpie 兼容的窗口形状（rate_limits: 5h/7d，USD，可选 reset_at），
+//   magpie 侧把余额地址填 http://<host>:<port>/v1/usage、key 填本网关的 API key 即可。
 
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -562,6 +565,106 @@ async function handleUsageUpstream(res, url) {
   sendJson(res, r.ok ? 200 : r.status, data ?? { ok: false, error: `上游返回非 JSON（HTTP ${r.status}）` });
 }
 
+// ---------- 余额/配额（GET /balance 自定义完整视图；GET /v1/usage magpie 兼容窗口形状） ----------
+let allowanceCache = { at: 0, account: null };
+const ALLOWANCE_TTL_MS = 30 * 1000;
+
+async function fetchAccount(session, force = false) {
+  if (!force && allowanceCache.account && Date.now() - allowanceCache.at < ALLOWANCE_TTL_MS) return allowanceCache.account;
+  const r = await fetch(`${APP_URL}/api/perchai/account`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${session.accessToken}` },
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await r.json().catch(() => null);
+  if (!r.ok || !data?.ok) {
+    throw httpError(502, `上游 /api/perchai/account 失败（HTTP ${r.status}）：${JSON.stringify(data)?.slice(0, 200)}`);
+  }
+  allowanceCache = { at: Date.now(), account: data };
+  return data;
+}
+
+const asNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+function buildBalance(account) {
+  const meter = account?.usageMeter ?? {};
+  const get = (...keys) => { for (const k of keys) if (meter[k] != null) return meter[k]; return null; };
+  const toWindows = (rolling, kind) => {
+    if (!rolling || typeof rolling !== "object" || rolling.enabled === false) return [];
+    const out = [];
+    const push = (id, label, usedUsd, capUsd, nextFreedAt) => {
+      if (usedUsd == null && capUsd == null) return;
+      out.push({
+        id, label, kind,
+        usedUsd: usedUsd ?? 0,
+        capUsd: capUsd ?? null,
+        percent: capUsd != null && capUsd > 0 ? Math.max(0, Math.min(Math.round(((usedUsd ?? 0) / capUsd) * 100), 100)) : null,
+        nextFreedAt: typeof nextFreedAt === "string" ? nextFreedAt : null,
+      });
+    };
+    push("5h", "5-hour", asNum(rolling.window5hUsd), asNum(rolling.window5hCapUsd), rolling.window5hNextFreedAt);
+    push("7d", "Weekly", asNum(rolling.window7dUsd), asNum(rolling.window7dCapUsd), rolling.window7dNextFreedAt);
+    return out;
+  };
+  const windows = [
+    ...toWindows(get("roost_rolling", "roostRolling"), "roost"),
+    ...toWindows(get("manual_rolling", "manualRolling"), "manual"),
+  ];
+  const creditPt = asNum(account?.creditBalancePt) ?? 0;
+  return {
+    ok: true,
+    plan: {
+      code: account?.session?.planCode ?? null,
+      name: account?.session?.planName ?? null,
+      membershipRole: account?.session?.membershipRole ?? null,
+    },
+    usage: {
+      dailyUsd: asNum(get("daily_usd", "dailyUsd")),
+      weeklyUsd: asNum(get("weekly_usd", "weeklyUsd")),
+      monthlyUsd: asNum(get("monthly_usd", "monthlyUsd")),
+      monthlyManualUsd: asNum(get("monthly_manual_usd", "monthlyManualUsd")),
+      dailyCalls: asNum(get("daily_calls", "dailyCalls")),
+      weeklyCalls: asNum(get("weekly_calls", "weeklyCalls")),
+      monthlyCalls: asNum(get("monthly_calls", "monthlyCalls")),
+      dailyTokens: asNum(get("daily_tokens", "dailyTokens")),
+      weeklyTokens: asNum(get("weekly_tokens", "weeklyTokens")),
+      monthlyTokens: asNum(get("monthly_tokens", "monthlyTokens")),
+      periodStart: get("period_start", "periodStart"),
+    },
+    windows,
+    creditBalancePt: creditPt,
+    balanceUsd: creditPt > 0 ? creditPt / 1000 : null,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function handleBalance(res) {
+  let session = await loadSession();
+  if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
+  session = await ensureFresh(session);
+  const balance = buildBalance(await fetchAccount(session));
+  console.log(`[${ts()}] /balance: plan=${balance.plan.code ?? "?"} | ${balance.windows.map((w) => `${w.kind}-${w.id} ${w.usedUsd}/${w.capUsd ?? "∞"}`).join(" , ") || "无窗口"}`);
+  sendJson(res, 200, balance);
+}
+
+// magpie 只认 /v1/usage 这个路径上的 sub2api 窗口形状；窗口按美元计，可选 reset_at
+async function handleMagpieUsage(res) {
+  let session = await loadSession();
+  if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
+  session = await ensureFresh(session);
+  const balance = buildBalance(await fetchAccount(session));
+  const rate_limits = balance.windows
+    .filter((w) => asNum(w.capUsd) != null && w.capUsd > 0)
+    .map((w) => ({
+      window: w.kind === "manual" ? `manual-${w.id}` : w.id,
+      limit: w.capUsd,
+      used: w.usedUsd,
+      ...(w.nextFreedAt ? { reset_at: w.nextFreedAt } : {}),
+    }));
+  const out = { ...(balance.balanceUsd != null ? { remaining: balance.balanceUsd } : {}), rate_limits };
+  console.log(`[${ts()}] /v1/usage(magpie): ${JSON.stringify(out)}`);
+  sendJson(res, 200, out);
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   try {
@@ -574,11 +677,17 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && (url.pathname === "/v1/models" || url.pathname === "/models")) {
       return await handleModels(res);
     }
-    if (req.method === "GET" && (url.pathname === "/usage" || url.pathname === "/v1/usage")) {
+    if (req.method === "GET" && url.pathname === "/usage") {
       return handleUsage(res, url);
     }
     if (req.method === "GET" && url.pathname === "/usage/upstream") {
       return await handleUsageUpstream(res, url);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/usage") {
+      return await handleMagpieUsage(res);
+    }
+    if (req.method === "GET" && url.pathname === "/balance") {
+      return await handleBalance(res);
     }
     if (req.method === "POST" && (url.pathname === "/v1/chat/completions" || url.pathname === "/chat/completions")) {
       return await handleChatCompletions(req, res);
@@ -608,6 +717,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  POST /v1/chat/completions   对话（stream 支持 true/false）`);
   console.log(`  GET  /v1/models             可用模型列表`);
   console.log(`  GET  /usage                本地用量流水（?limit=N）；/usage/upstream 查服务端权威用量`);
+  console.log(`  GET  /v1/usage             magpie 兼容余额窗口（5h/7d，USD）；GET /balance 完整配额视图`);
   if (apiKey) {
     console.log(`  API key 鉴权：已开启${keyInfo?.generated ? "（本次新生成）" : keyInfo?.fromFile ? "（读自 api-key.txt）" : ""}`);
     if (keyInfo?.generated) console.log(`  你的 API key（请保存）：${apiKey}`);
