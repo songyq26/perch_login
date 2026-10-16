@@ -15,8 +15,8 @@
 // （非标准扩展字段）；stream_restart 无法在 OpenAI 协议里表达回滚。
 //
 // 流式心跳：Perch 的 /model-call 每 15.00s 发一行 `: keepalive` 注释（官方客户端只拿它
-// 续命、丢弃注释，且自身没有空闲超时）。本网关同样在流式响应里发同款注释——连上先发一个，
-// 之后每 15s 一个，覆盖推理期的长静默；PERCH_KEEPALIVE_MS=0 关闭。
+// 续命、丢弃注释，且自身没有空闲超时）。本网关发同款注释——连上先发一个，之后默认每 5s 一个
+// （比官方 15s 更密，纯本地行为、不额外消耗额度），覆盖推理期的长静默；PERCH_KEEPALIVE_MS=0 关闭。
 //
 // 推理强度（reasoning_effort / reasoning.effort，none→off、minimal→low 自动映射）：
 //   · 档位请求（model=pro 等）：随 Roost 三件套发送（官方行为）
@@ -48,8 +48,8 @@ const HOST = flagValue("--host") ?? process.env.HOST ?? "127.0.0.1";
 const MAX_TOKENS_CAP = 32000;
 // SSE 心跳：官方 Perch 在 /model-call 上每 15.00s 发一行 `: keepalive` 注释（实测 181s 里 13 个，
 // 间隔恒定），客户端只拿它续命、不当内容——推理阶段是全程静默的，没有它客户端会被空闲超时误杀。
-// PERCH_KEEPALIVE_MS=0 可关闭。
-const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 15000);
+// 本网关默认收紧到 5s（比官方密，纯本地行为、不额外消耗额度），PERCH_KEEPALIVE_MS=0 可关闭。
+const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 5000);
 // pin/自动路由的 effort 转发：默认开启（实测服务端会采纳这个组合；官方 CLI 不发送它）
 // 关闭方式：PERCH_FORWARD_PIN_EFFORT=0
 const FORWARD_PIN_EFFORT = !["0", "false", "off"].includes(String(process.env.PERCH_FORWARD_PIN_EFFORT ?? "").trim().toLowerCase());
