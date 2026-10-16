@@ -311,7 +311,7 @@ async function handleChatCompletions(req, res) {
     effortBody = mapped;
   }
   const effortRequested = effortSuffix ?? effortBody;
-  console.log(`[${ts()} #${reqId}] 收到: model="${requestedModel}" | effort=${effortSuffix ?? rawEffort ?? "未指定"}${effortSuffix ? "（model 后缀）" : rawEffortSource ? `（${rawEffortSource}）` : ""} | stream=${stream} | 消息=${Array.isArray(body.messages) ? body.messages.length : 0} | tools=${Array.isArray(body.tools) ? body.tools.length : 0} | max_tokens=${body.max_tokens ?? body.max_completion_tokens ?? "默认"} | temperature=${body.temperature ?? "默认"}`);
+  console.log(`[${ts()} #${reqId}] 收到: model="${requestedModel}" | effort=${effortSuffix ?? rawEffort ?? "未指定"}${effortSuffix ? "（model 后缀）" : rawEffortSource ? `（${rawEffortSource}）` : ""} | stream=${stream} | 消息=${Array.isArray(body.messages) ? body.messages.length : 0} | tools=${Array.isArray(body.tools) ? body.tools.length : 0} | max_tokens=${body.max_tokens ?? body.max_completion_tokens ?? "默认"} | temperature=${body.temperature ?? "默认"} | UA=${(req.headers["user-agent"] ?? "无").slice(0, 70)}`);
   const tier = isAuto ? null : resolveTier(tierPart);
   let pin = isAuto || tier ? null : await resolveModel(requestedModel);
   let pinFromServerDefaults = false;
