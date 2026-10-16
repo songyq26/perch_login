@@ -17,6 +17,7 @@
 // 流式心跳：Perch 的 /model-call 每 15.00s 发一行 `: keepalive` 注释（官方客户端只拿它
 // 续命、丢弃注释，且自身没有空闲超时）。本网关发同款注释——连上先发一个，之后默认每 5s 一个
 // （比官方 15s 更密，纯本地行为、不额外消耗额度），覆盖推理期的长静默；PERCH_KEEPALIVE_MS=0 关闭。
+// 注释后不带空行（照 magpie 的写法）：空块会被 openai-go v2 那类客户端当成事件而报错。
 //
 // 推理强度（reasoning_effort / reasoning.effort，none→off、minimal→low 自动映射）：
 //   · 档位请求（model=pro 等）：随 Roost 三件套发送（官方行为）
@@ -449,14 +450,16 @@ async function handleChatCompletions(req, res) {
     choices: [{ index: 0, delta, finish_reason: finish }],
   });
 
-  // 官方同款心跳：连上就发第一个，之后每 KEEPALIVE_MS 一行，客户端丢弃注释只当续命
+  // 心跳：连上就发第一个，之后每 KEEPALIVE_MS 一行，客户端丢弃注释只当续命。
+  // 注释后不带空行（照 magpie 的写法）：把"没有 data 的空块"当事件读的客户端
+  // （openai-go v2 / Crush）会报 unexpected end of JSON input；按行解析的客户端不受影响。
   const ka = KEEPALIVE_MS > 0
     ? setInterval(() => {
-        if (!res.writableEnded) res.write(": keepalive\n\n");
+        if (!res.writableEnded) res.write(": keepalive\n");
       }, KEEPALIVE_MS)
     : null;
   ka?.unref?.();
-  if (ka) res.write(": keepalive\n\n");
+  if (ka) res.write(": keepalive\n");
 
   chunk({ role: "assistant" });
   let upstream;
