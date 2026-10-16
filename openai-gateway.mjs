@@ -408,11 +408,18 @@ async function handleChatCompletions(req, res) {
   });
 
   const ac = new AbortController();
+  // 诊断用：客户端到底等了多久才走、走到哪一步（日志里最缺的就是这行）
+  let upHeadAt = 0, firstDeltaAt = 0, sentChunks = 0;
+  const sinceStart = (t) => (t ? `${t - started}ms` : "未到");
   res.on("close", () => {
-    if (!res.writableEnded) ac.abort();
+    if (res.writableEnded) return;
+    console.log(`[${ts()} #${reqId}] 客户端中断：已等 ${Date.now() - started}ms | 上游响应头 ${sinceStart(upHeadAt)} | 上游首个增量 ${sinceStart(firstDeltaAt)} | 已下发 ${sentChunks} 块`);
+    ac.abort();
   });
 
   const { res: up } = await callModel(session, await tickets.headers(), perchBody, ac.signal);
+  upHeadAt = Date.now();
+  console.log(`[${ts()} #${reqId}] 上游响应头 ${upHeadAt - started}ms（HTTP ${up.status}）`);
   const ct = up.headers.get("content-type") ?? "";
   if (!ct.includes("text/event-stream")) {
     const raw = await up.text().catch(() => "");
@@ -444,11 +451,20 @@ async function handleChatCompletions(req, res) {
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
-  const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-  const chunk = (delta, finish = null) => send({
-    id, object: "chat.completion.chunk", created, model: modelLabel,
-    choices: [{ index: 0, delta, finish_reason: finish }],
-  });
+  const send = (obj) => {
+    sentChunks++;
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  };
+  const chunk = (delta, finish = null) => {
+    if (!firstDeltaAt && (delta.content || delta.reasoning_content)) {
+      firstDeltaAt = Date.now();
+      console.log(`[${ts()} #${reqId}] 上游首个增量 ${firstDeltaAt - started}ms`);
+    }
+    send({
+      id, object: "chat.completion.chunk", created, model: modelLabel,
+      choices: [{ index: 0, delta, finish_reason: finish }],
+    });
+  };
 
   // 心跳：连上就发第一个，之后每 KEEPALIVE_MS 一行，客户端丢弃注释只当续命。
   // 注释后不带空行（照 magpie 的写法）：把"没有 data 的空块"当事件读的客户端
