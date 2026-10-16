@@ -14,6 +14,10 @@
 // tool_use_end/done 后整段下发）；reasoning_delta 映射为 delta.reasoning_content
 // （非标准扩展字段）；stream_restart 无法在 OpenAI 协议里表达回滚。
 //
+// 流式心跳：Perch 的 /model-call 每 15.00s 发一行 `: keepalive` 注释（官方客户端只拿它
+// 续命、丢弃注释，且自身没有空闲超时）。本网关同样在流式响应里发同款注释——连上先发一个，
+// 之后每 15s 一个，覆盖推理期的长静默；PERCH_KEEPALIVE_MS=0 关闭。
+//
 // 推理强度（reasoning_effort / reasoning.effort，none→off、minimal→low 自动映射）：
 //   · 档位请求（model=pro 等）：随 Roost 三件套发送（官方行为）
 //   · pin / 自动路由请求：默认也随请求转发（实测服务端会采纳；官方 CLI 不发送
@@ -42,6 +46,10 @@ const flagValue = (name) => {
 const PORT = Number(process.env.PORT ?? flagValue("--port") ?? 8787);
 const HOST = flagValue("--host") ?? process.env.HOST ?? "127.0.0.1";
 const MAX_TOKENS_CAP = 32000;
+// SSE 心跳：官方 Perch 在 /model-call 上每 15.00s 发一行 `: keepalive` 注释（实测 181s 里 13 个，
+// 间隔恒定），客户端只拿它续命、不当内容——推理阶段是全程静默的，没有它客户端会被空闲超时误杀。
+// PERCH_KEEPALIVE_MS=0 可关闭。
+const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 15000);
 // pin/自动路由的 effort 转发：默认开启（实测服务端会采纳这个组合；官方 CLI 不发送它）
 // 关闭方式：PERCH_FORWARD_PIN_EFFORT=0
 const FORWARD_PIN_EFFORT = !["0", "false", "off"].includes(String(process.env.PERCH_FORWARD_PIN_EFFORT ?? "").trim().toLowerCase());
@@ -441,8 +449,23 @@ async function handleChatCompletions(req, res) {
     choices: [{ index: 0, delta, finish_reason: finish }],
   });
 
+  // 官方同款心跳：连上就发第一个，之后每 KEEPALIVE_MS 一行，客户端丢弃注释只当续命
+  const ka = KEEPALIVE_MS > 0
+    ? setInterval(() => {
+        if (!res.writableEnded) res.write(": keepalive\n\n");
+      }, KEEPALIVE_MS)
+    : null;
+  ka?.unref?.();
+  if (ka) res.write(": keepalive\n\n");
+
   chunk({ role: "assistant" });
-  const { text, reasoning, toolCalls, doneEv, streamError } = await consumeUpstream(up, (d) => chunk(d));
+  let upstream;
+  try {
+    upstream = await consumeUpstream(up, (d) => chunk(d));
+  } finally {
+    if (ka) clearInterval(ka);
+  }
+  const { text, reasoning, toolCalls, doneEv, streamError } = upstream;
 
   if (streamError) {
     send({ error: { message: streamError, type: "upstream_error" } });
