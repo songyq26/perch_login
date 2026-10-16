@@ -251,7 +251,17 @@ async function consumeUpstream(up, onDelta) {
   let toolCalls = [];
   let doneEv = null;
   let streamError = null;
+  // 诊断：流"静悄悄结束"时（没有 done、也没有 error）要能说清它经历了什么
+  const stat = { events: 0, kinds: [], lastAt: 0, started: Date.now(), otherTypes: [] };
   await readSSE(up, (ev) => {
+    stat.events++;
+    stat.lastAt = Date.now();
+    const kind = ev.type === "answer_delta" ? "answer" : ev.type === "reasoning_delta" ? "reasoning" : ev.type ?? "?";
+    if (stat.kinds[stat.kinds.length - 1] !== kind) stat.kinds.push(kind);
+    if (stat.kinds.length > 12) stat.kinds.shift();
+    if (!["answer_delta", "reasoning_delta", "tool_call_delta", "tool_use_end", "done", "error"].includes(ev.type)) {
+      stat.otherTypes.push(String(ev.type ?? "?"));
+    }
     if (ev.type === "answer_delta" && typeof ev.text === "string") {
       text += ev.text;
       onDelta?.({ content: ev.text });
@@ -268,7 +278,20 @@ async function consumeUpstream(up, onDelta) {
   });
   const finalRaw = doneEv?.toolCalls?.length ? doneEv.toolCalls : toolCalls;
   const sealed = (finalRaw ?? []).filter((tc) => tc?.sealed !== false);
-  return { text, reasoning, toolCalls: sealed, doneEv, streamError };
+  return { text, reasoning, toolCalls: sealed, doneEv, streamError, stat };
+}
+
+// 流结束却没有 done/error 时，把它到底"怎么结束的"打成一行，便于对账上游行为
+function warnIfUpstreamCut({ stat, doneEv, streamError, text, reasoning, toolCalls }, tag) {
+  if (doneEv || streamError) return false;
+  const ended = Date.now();
+  const quiet = stat.lastAt ? `${ended - stat.lastAt}ms` : "从未收到事件";
+  console.warn(
+    `[${ts()}] ${tag} 上游流结束但没给 done：开了 ${ended - stat.started}ms | 事件 ${stat.events} 个 | ` +
+    `最后事件后静默 ${quiet} | 事件序列 ${stat.kinds.join("→") || "（无）"} | 正文 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | 工具 ${toolCalls.length}` +
+    (stat.otherTypes.length ? ` | 其他类型 ${[...new Set(stat.otherTypes)].join(",")}` : ""),
+  );
+  return true;
 }
 
 function finishReasonOf(doneEv, toolCalls) {
@@ -430,7 +453,9 @@ async function handleChatCompletions(req, res) {
   const created = Math.floor(Date.now() / 1000);
 
   if (!stream) {
-    const { text, reasoning, toolCalls, doneEv, streamError } = await consumeUpstream(up);
+    const upstream = await consumeUpstream(up);
+    warnIfUpstreamCut(upstream, `#${reqId}（非流式）`);
+    const { text, reasoning, toolCalls, doneEv, streamError } = upstream;
     if (streamError) throw httpError(502, `上游流错误：${streamError}`);
     if (doneEv?.ok === false) throw httpError(502, `上游失败：${doneEv.error ?? doneEv.errorCode ?? "unknown"}`);
     const message = { role: "assistant", content: text || null };
@@ -484,6 +509,7 @@ async function handleChatCompletions(req, res) {
   } finally {
     if (ka) clearInterval(ka);
   }
+  warnIfUpstreamCut(upstream, `#${reqId}（流式）`);
   const { text, reasoning, toolCalls, doneEv, streamError } = upstream;
 
   if (streamError) {
