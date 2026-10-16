@@ -281,17 +281,32 @@ async function consumeUpstream(up, onDelta) {
   return { text, reasoning, toolCalls: sealed, doneEv, streamError, stat };
 }
 
-// 流结束却没有 done/error 时，把它到底"怎么结束的"打成一行，便于对账上游行为
-function warnIfUpstreamCut({ stat, doneEv, streamError, text, reasoning, toolCalls }, tag) {
-  if (doneEv || streamError) return false;
-  const ended = Date.now();
-  const quiet = stat.lastAt ? `${ended - stat.lastAt}ms` : "从未收到事件";
-  console.warn(
-    `[${ts()}] ${tag} 上游流结束但没给 done：开了 ${ended - stat.started}ms | 事件 ${stat.events} 个 | ` +
-    `最后事件后静默 ${quiet} | 事件序列 ${stat.kinds.join("→") || "（无）"} | 正文 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | 工具 ${toolCalls.length}` +
-    (stat.otherTypes.length ? ` | 其他类型 ${[...new Set(stat.otherTypes)].join(",")}` : ""),
-  );
-  return true;
+// 收尾不正常时（没有 done、error 事件、done 说失败、done 缺模型/用量）把它"怎么结束的"打成一行
+function logUpstreamTail(up, tag) {
+  const { stat, doneEv, streamError, text, reasoning, toolCalls } = up;
+  if (streamError) {
+    console.warn(`[${ts()}] ${tag} 上游 error 事件：${streamError.slice(0, 300)} | 事件 ${stat.events} 个 | 序列 ${stat.kinds.join("→")}`);
+    return true;
+  }
+  if (!doneEv) {
+    const ended = Date.now();
+    const quiet = stat.lastAt ? `${ended - stat.lastAt}ms` : "从未收到事件";
+    console.warn(
+      `[${ts()}] ${tag} 上游流结束但没给 done：开了 ${ended - stat.started}ms | 事件 ${stat.events} 个 | ` +
+      `最后事件后静默 ${quiet} | 事件序列 ${stat.kinds.join("→") || "（无）"} | 正文 ${text.length} 字符 | 推理 ${reasoning.length} 字符 | 工具 ${toolCalls.length}` +
+      (stat.otherTypes.length ? ` | 其他类型 ${[...new Set(stat.otherTypes)].join(",")}` : ""),
+    );
+    return true;
+  }
+  if (doneEv.ok === false) {
+    console.warn(`[${ts()}] ${tag} 上游 done(ok=false)：${JSON.stringify(doneEv).slice(0, 400)}`);
+    return true;
+  }
+  if (!doneEv.model || !doneEv.usage) {
+    console.warn(`[${ts()}] ${tag} 上游 done 缺 model/usage：${JSON.stringify(doneEv).slice(0, 400)}`);
+    return true;
+  }
+  return false;
 }
 
 function finishReasonOf(doneEv, toolCalls) {
@@ -454,7 +469,7 @@ async function handleChatCompletions(req, res) {
 
   if (!stream) {
     const upstream = await consumeUpstream(up);
-    warnIfUpstreamCut(upstream, `#${reqId}（非流式）`);
+    logUpstreamTail(upstream, `#${reqId}（非流式）`);
     const { text, reasoning, toolCalls, doneEv, streamError } = upstream;
     if (streamError) throw httpError(502, `上游流错误：${streamError}`);
     if (doneEv?.ok === false) throw httpError(502, `上游失败：${doneEv.error ?? doneEv.errorCode ?? "unknown"}`);
@@ -509,7 +524,7 @@ async function handleChatCompletions(req, res) {
   } finally {
     if (ka) clearInterval(ka);
   }
-  warnIfUpstreamCut(upstream, `#${reqId}（流式）`);
+  logUpstreamTail(upstream, `#${reqId}（流式）`);
   const { text, reasoning, toolCalls, doneEv, streamError } = upstream;
 
   if (streamError) {
