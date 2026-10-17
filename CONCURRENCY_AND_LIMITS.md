@@ -176,3 +176,56 @@ function spendCaps() {
 ---
 
 *整理完成：2026-10-13 · 全部来自既有逆向与蜜罐数据，零新增网络请求*
+
+---
+
+## 六、本仓库网关（`openai-gateway.mjs` / `perch-core.mjs`）怎么处理这几层
+
+> 证据源：本仓库源码 + 线上日志实测（2026-10-16 ~ 17）
+> 口径：只讲"走我们自己的网关"这条路径，与服务端机制互为对照
+
+### 6.1 一票一轮：每个请求各领一张票，彼此独立
+
+- `handleChatCompletions` 里**每个请求**都新建一个 `createTicketManager()`（`openai-gateway.mjs:385`），
+  `obtain()` 拿到的 runId 直接进请求体，形如 `tkt-cli-<ts>-<rand>`。
+- **没有跨请求复用**：不存在"一张票轮流给多轮用"或"全局串行领票"的逻辑 → 多路请求在网关这一层是并行的。
+- 领票失败**不一定报错**（`perch-core.mjs` `fetchNew` / `obtain` / `headers`）：
+  - 429 且 `enforced + errorCode=turn_rate_limited` → 抛 `PerchTicketError` → 网关回 **429**；
+  - 其它失败（网络/非 enforced/非 429）→ `obtain()` 返回 `null`，网关退回 `fallbackRunId()`
+    （`cli-turn-<ts>-<rand>`）**照常发请求** —— 线上日志里能看到这种 `runId=cli-turn-…` 的轮次；
+  - `enforced` 且始终拿不到票 → `headers()` 抛 `turn_ticket_unavailable` → 网关回 **502**。
+
+### 6.2 哪些限制能变成 429，哪些不能
+
+| 上游形态 | 网关给客户端的结果 |
+|---|---|
+| 领票被限速（L3：HTTP 429 + `enforced`） | **429**（`openai-gateway.mjs:787` 显式映射），文案带"轮次限速" |
+| enforced 但拿不到票 | **502** + "Perch 无法开始受管模型轮次…" |
+| **消费额度（L4）** | ⚠️ 它是从 `model-call` 的 `done{ok:false,errorCode}` 回来的，**不是 HTTP 状态**：非流式 → **502**"上游失败：…"（`:475`）；流式（响应头已发）→ **流内 `data:{"error":…}`**，客户端看到仍是 200 |
+| 模型忙（`The model is busy right now`，`api_error`） | 同上（实测：等 30~184 秒后才回这个 `done`） |
+
+> 可改进：按 `done.errorCode`（`usage_limit_reached` / `api_error` …）映射状态码，让客户端能统一按 429/503 退避重试。
+
+### 6.3 并发上限到底在哪（走网关这条路径）
+
+- **网关本身没有任何并发闸**：无信号量、无队列、无按账号的并发计数（grep `concurren|semaphore|inflight`
+  只命中 token 刷新的 in-flight 去重）。
+- 官方 CLI 的 **L1 / L5 / L6**（16 并发 agent 池、后台 shell 任务、工具调用预算）**只作用在客户端进程里**；
+  走网关时子 agent 由调用方自己调度（例如 Kimi Code 的 AgentSwarm），网关不参与也不限制。
+- 真正会拦住并发的是：**L3 票据速率**（→429）、**L4 额度窗口**（→502/流内 error）、**上游容量**（模型忙）。
+- 也就是说：**并发数不是变量，速率与额度才是。**
+
+### 6.4 L7（token 刷新锁）在网关侧的表现
+
+- 网关用 `ensureFresh()`：同一进程内，同一个 session 的刷新请求**合并成一次**（`inflightRefreshes`，`:154-169`）；
+- 跨进程靠 `~/.perch/cli-auth-refresh.lock` 文件锁（本仓库 `perch-core.mjs` 的 `acquireRefreshLock` 实现了同样的排他 + 陈旧清理 + 退避）；
+- 结论：**多并发/多进程同时打网关不会把 refresh_token 用废** —— 这一点与官方 CLI 的 L7 行为一致。
+
+### 6.5 一句话
+
+多路并发请求在网关这一层是"直通"的，不会有本地排队；能不能跑起来取决于**票据速率、额度窗口、上游容量**，
+不取决于你开了几个并发。要压测/扇出时，优先选不烧 Perch 额度且出字快的上游（如 opencode / ollama-cloud 那批）。
+
+---
+
+*2026-10-17 补第六节：本仓库网关对 L2/L3/L4 的透传行为 · 来源为本仓库源码与线上日志*
