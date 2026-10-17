@@ -3,6 +3,9 @@ token.json
 api-key.txt
 honeypot/.perch/mcp.json
 
+# Perch CLI 在本目录生成的本地状态：mcp.json 里会带真实 API key（如 CourtListener 的）
+.perch/
+
 # 运行时状态与构建产物
 state/
 __pycache__/
