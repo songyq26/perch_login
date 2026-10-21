@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Perch CLI 登录 + 发送请求流程（仅 Node 内置模块，无第三方依赖）
 //
-//   node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]
+//   node perch-client.mjs login [--account <名字>] [--provider google|github] [--timeout 300] [--port 8976] [--callback]
 //   node perch-client.mjs ask "你的问题" [--model <id/显示名/档位[@强度]>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]
 //   node perch-client.mjs models [--sync]
+//   node perch-client.mjs accounts [--no-usage]
 //   node perch-client.mjs status
 //
 // 会话保存在同目录 token.json（0600）。User-Agent 固定为官方降级值
@@ -18,9 +19,10 @@ import { createServer } from "node:http";
 import { promises as fs } from "node:fs";
 import {
   APP_URL, TOKEN_FILE, b64url, fetchAuthConfig, supabaseToken, sessionFromToken,
-  saveSession, loadSession, ensureFresh, postJson, callModel, readSSE,
+  saveSession, saveSessionAt, loadSession, ensureFresh, postJson, callModel, readSSE,
   createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS,
 } from "./perch-core.mjs";
+import { accountTokenFile, addAccountConfig, listAccounts, fetchAccountUsage, manualWindowState, describeAccount } from "./accounts.mjs";
 import { syncModels } from "./sync-models.mjs";
 
 const CALLBACK_PATH = "/callback";
@@ -139,6 +141,8 @@ async function cmdLogin(args) {
   const timeoutSec = Number(flagValue(args, "--timeout") ?? 300);
   const portArg = flagValue(args, "--port");
   const manual = !args.includes("--callback");
+  const account = flagValue(args, "--account")?.trim() || null;
+  const accountFile = account ? accountTokenFile(account) : null; // 顺带校验账号名
   const port = portArg === undefined ? 0 : Number(portArg);
   if (portArg !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
     throw new Error(`--port 需要 1-65535 的整数（收到：${portArg}）`);
@@ -190,8 +194,14 @@ async function cmdLogin(args) {
     const data = await supabaseToken(cfg.supabaseUrl, cfg.supabaseAnonKey, "pkce", { auth_code: code, code_verifier: verifier });
     const session = sessionFromToken(data, cfg.appUrl || APP_URL);
     await updateSignupSource(cfg, session, data.user?.user_metadata?.signup_source);
-    await saveSession(session);
-    console.log(`\n√ 登录成功，会话已保存到 ${TOKEN_FILE}`);
+    if (accountFile) {
+      await saveSessionAt(session, accountFile);
+      await addAccountConfig(account);
+    } else {
+      await saveSession(session);
+    }
+    console.log(`\n√ 登录成功，会话已保存到 ${accountFile ?? TOKEN_FILE}`);
+    if (account) console.log(`  账号名: ${account}（已写入 accounts.json，列表顺序即优先级）`);
     console.log(`  userId: ${session.userId}`);
     console.log(`  email:  ${session.email}`);
   } finally {
@@ -324,6 +334,32 @@ async function cmdAsk(args) {
   }
 }
 
+async function cmdAccounts(args) {
+  const withUsage = !args.includes("--no-usage");
+  const accounts = await listAccounts();
+  if (!accounts.length) {
+    console.log("没有配置账号。用 node perch-client.mjs login --account <名字> 登录；");
+    console.log("不建 accounts.json 时，网关会退回单账号 token.json。");
+    return;
+  }
+  console.log(`共 ${accounts.length} 个账号（列表顺序即优先级）：`);
+  for (const [i, a] of accounts.entries()) {
+    const state = !a.enabled ? "已禁用" : a.session ? "已登录" : "未登录";
+    let extra = "";
+    if (withUsage && a.enabled && a.session) {
+      try {
+        const st = manualWindowState(await fetchAccountUsage(a));
+        extra = st.enabled
+          ? ` | manual ${st.windows.map((w) => `${w.id} ${w.used ?? 0}/${w.cap ?? "?"}`).join(" · ")}${st.exhausted ? ` ← 已满，${st.nextFreedAt ?? "?"} 恢复` : ""}`
+          : " | manual rolling 未启用";
+      } catch (e) {
+        extra = ` | 额度读取失败：${e.message}`;
+      }
+    }
+    console.log(`  ${i + 1}. ${a.name} — ${state}${extra}`);
+  }
+}
+
 async function cmdStatus() {
   const s = await loadSession();
   if (!s) {
@@ -368,10 +404,11 @@ const [cmd, ...args] = process.argv.slice(2);
 try {
   if (cmd === "login") await cmdLogin(args);
   else if (cmd === "ask") await cmdAsk(args);
+  else if (cmd === "accounts") await cmdAccounts(args);
   else if (cmd === "status") await cmdStatus();
   else if (cmd === "models") await cmdModels(args);
   else {
-    console.log('用法:\n  node perch-client.mjs login [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器）\n  node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs status');
+    console.log('用法:\n  node perch-client.mjs login [--account <名字>] [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器；--account 登录到多账号列表）\n  node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs accounts [--no-usage]\n  node perch-client.mjs status');
     process.exitCode = cmd ? 1 : 0;
   }
 } catch (e) {

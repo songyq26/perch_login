@@ -73,21 +73,31 @@ export function sessionFromToken(data, appUrl) {
 
 let sessionFile = TOKEN_FILE;
 
+export async function saveSessionAt(session, file) {
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await fs.writeFile(file, JSON.stringify(session, null, 2) + "\n", { mode: 0o600 });
+  await fs.chmod(file, 0o600).catch(() => {});
+}
+
 export async function saveSession(session) {
-  await fs.mkdir(path.dirname(sessionFile), { recursive: true, mode: 0o700 });
-  await fs.writeFile(sessionFile, JSON.stringify(session, null, 2) + "\n", { mode: 0o600 });
-  await fs.chmod(sessionFile, 0o600).catch(() => {});
+  await saveSessionAt(session, sessionFile);
+}
+
+export async function loadSessionAt(file) {
+  try {
+    const s = JSON.parse(await fs.readFile(file, "utf8"));
+    if (s?.accessToken) return { ...s, appUrl: s.appUrl || APP_URL };
+  } catch {}
+  return null;
 }
 
 export async function loadSession() {
   for (const file of [TOKEN_FILE, path.join(import.meta.dirname, "state", "token.json")]) {
-    try {
-      const s = JSON.parse(await fs.readFile(file, "utf8"));
-      if (s?.accessToken) {
-        sessionFile = file;
-        return { ...s, appUrl: s.appUrl || APP_URL };
-      }
-    } catch {}
+    const s = await loadSessionAt(file);
+    if (s) {
+      sessionFile = file;
+      return s;
+    }
   }
   return null;
 }
@@ -154,7 +164,7 @@ async function writeRevokedCache(hash) {
 const inflightRefreshes = new Map();
 const refreshBackoffUntil = new Map();
 
-export async function ensureFresh(session, force = false) {
+export async function ensureFresh(session, force = false, file = null) {
   const now = Math.floor(Date.now() / 1000);
   if (!force && session.expiresAt && session.expiresAt > now + EXPIRY_MARGIN_S) return session;
   if (!session.refreshToken) throw new Error("会话已过期且无 refresh_token，请重新运行 login");
@@ -165,16 +175,16 @@ export async function ensureFresh(session, force = false) {
   const backoff = refreshBackoffUntil.get(key);
   if (backoff && backoff > Date.now()) throw new Error("会话刷新失败退避中（30 秒），请稍后重试");
 
-  const p = doRefresh(session, key).finally(() => inflightRefreshes.delete(key));
+  const p = doRefresh(session, key, file ?? sessionFile).finally(() => inflightRefreshes.delete(key));
   inflightRefreshes.set(key, p);
   return p;
 }
 
-async function doRefresh(session, key) {
+async function doRefresh(session, key, file) {
   const release = await acquireRefreshLock();
   try {
     // 锁内二次检查：并发进程可能刚刷新过，直接采用最新会话
-    const latest = await loadSession();
+    const latest = await loadSessionAt(file);
     const nowS = Math.floor(Date.now() / 1000);
     if (
       latest?.accessToken &&
@@ -194,7 +204,7 @@ async function doRefresh(session, key) {
     try {
       const data = await supabaseToken(cfg.supabaseUrl, cfg.supabaseAnonKey, "refresh_token", { refresh_token: session.refreshToken });
       const fresh = sessionFromToken(data, session.appUrl || cfg.appUrl || APP_URL);
-      await saveSession(fresh);
+      await saveSessionAt(fresh, file);
       refreshBackoffUntil.delete(key);
       return fresh;
     } catch (e) {

@@ -37,6 +37,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, ROOST_EFFORT_LEVELS } from "./perch-core.mjs";
+import { pickAccount, describeAccount, invalidateUsage } from "./accounts.mjs";
 import { syncIfStale } from "./sync-models.mjs";
 
 const args = process.argv.slice(2);
@@ -230,10 +231,10 @@ async function getWorkspace(session, query) {
 
 // 服务端实时默认模型（public-model-default），15 分钟缓存；服务端先行上线的模型会出现在这里
 let defaultsCache = { at: 0, ids: new Set() };
-async function getServerDefaultIds(session) {
+async function getServerDefaultIds(session, tokenFile = null) {
   if (Date.now() - defaultsCache.at < CTX_TTL_MS) return defaultsCache.ids;
   try {
-    const fresh = await ensureFresh(session);
+    const fresh = await ensureFresh(session, false, tokenFile);
     const r = await fetch(`${APP_URL}/api/perch-terminal/public-model-default`, {
       headers: { Accept: "application/json", Authorization: `Bearer ${fresh.accessToken}` },
     });
@@ -362,13 +363,16 @@ async function handleChatCompletions(req, res) {
   const maxTokens = Math.min(Math.max(Number.isFinite(rawMax) ? rawMax : MAX_TOKENS_CAP, 1), MAX_TOKENS_CAP);
   const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
 
-  let session = await loadSession();
+  const picked = await pickAccount();
+  const accountLabel = describeAccount(picked);
+  let session = picked.account.session;
   if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
-  session = await ensureFresh(session);
+  session = await ensureFresh(session, false, picked.account.tokenFile ?? undefined);
+  console.log(`[${ts()} #${reqId}] 账号: ${accountLabel}${picked.skipped?.length ? ` | 跳过: ${picked.skipped.join("；")}` : ""}`);
 
   // 本地注册表没有的 id，再对照服务端 public-model-default 的实时默认值（服务端可能先行上线新模型）
   if (!isAuto && !tier && !pin) {
-    const defaults = await getServerDefaultIds(session);
+    const defaults = await getServerDefaultIds(session, picked.account.tokenFile);
     if (defaults.has(requestedModel)) {
       pin = { id: requestedModel, label: requestedModel, serverDefault: true };
       pinFromServerDefaults = true;
@@ -433,6 +437,7 @@ async function handleChatCompletions(req, res) {
   const usageEntry = (doneEv, isStream) => ({
     ts: new Date().toISOString(),
     runId,
+    account: picked.account.name,
     requested: modelLabel,
     actual: doneEv?.model ?? null,
     inputTokens: doneEv?.usage?.inputTokens ?? null,
@@ -472,7 +477,11 @@ async function handleChatCompletions(req, res) {
     logUpstreamTail(upstream, `#${reqId}（非流式）`);
     const { text, reasoning, toolCalls, doneEv, streamError } = upstream;
     if (streamError) throw httpError(502, `上游流错误：${streamError}`);
-    if (doneEv?.ok === false) throw httpError(502, `上游失败：${doneEv.error ?? doneEv.errorCode ?? "unknown"}`);
+    if (doneEv?.ok === false) {
+      const code = doneEv.errorCode;
+      if (code === "usage_limit_reached") invalidateUsage(picked.account.name);
+      throw httpError(code === "usage_limit_reached" ? 429 : 502, `上游失败：${doneEv.error ?? code ?? "unknown"}`);
+    }
     const message = { role: "assistant", content: text || null };
     if (toolCalls.length) message.tool_calls = toOpenAIToolCalls(toolCalls).map(({ index, ...tc }) => tc);
     sendJson(res, 200, {
@@ -530,6 +539,8 @@ async function handleChatCompletions(req, res) {
   if (streamError) {
     send({ error: { message: streamError, type: "upstream_error" } });
   } else if (doneEv?.ok === false) {
+    // 额度用尽：把该账号的额度缓存作废，下一次请求预检就会跳过它
+    if (doneEv.errorCode === "usage_limit_reached") invalidateUsage(picked.account.name);
     send({ error: { message: String(doneEv.error ?? doneEv.errorCode ?? "upstream failed"), type: "upstream_error" } });
   } else {
     if (toolCalls.length) chunk({ tool_calls: toOpenAIToolCalls(toolCalls) });
@@ -635,9 +646,10 @@ async function handleUsageUpstream(res, url) {
   if (runIds.length === 0) {
     throw httpError(400, "没有可查询的 runId：先通过网关发几条对话（网关会记录 runId），或用 ?runIds=a,b,c 指定");
   }
-  let session = await loadSession();
+  const picked = await pickAccount({ preflight: false });
+  let session = picked.account.session;
   if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
-  session = await ensureFresh(session);
+  session = await ensureFresh(session, false, picked.account.tokenFile ?? undefined);
   const r = await fetch(`${APP_URL}/api/perch-terminal/usage`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
@@ -650,11 +662,13 @@ async function handleUsageUpstream(res, url) {
 }
 
 // ---------- 余额/配额（GET /balance 自定义完整视图；GET /v1/usage magpie 兼容窗口形状） ----------
-let allowanceCache = { at: 0, account: null };
 const ALLOWANCE_TTL_MS = 30 * 1000;
 
-async function fetchAccount(session, force = false) {
-  if (!force && allowanceCache.account && Date.now() - allowanceCache.at < ALLOWANCE_TTL_MS) return allowanceCache.account;
+// 按账号名缓存（多账号时各看各的）
+let allowanceCache = new Map();
+async function fetchAccount(session, force = false, key = "default") {
+  const hit = allowanceCache.get(key);
+  if (!force && hit && Date.now() - hit.at < ALLOWANCE_TTL_MS) return hit.account;
   const r = await fetch(`${APP_URL}/api/perchai/account`, {
     headers: { Accept: "application/json", Authorization: `Bearer ${session.accessToken}` },
     signal: AbortSignal.timeout(8000),
@@ -663,7 +677,7 @@ async function fetchAccount(session, force = false) {
   if (!r.ok || !data?.ok) {
     throw httpError(502, `上游 /api/perchai/account 失败（HTTP ${r.status}）：${JSON.stringify(data)?.slice(0, 200)}`);
   }
-  allowanceCache = { at: Date.now(), account: data };
+  allowanceCache.set(key, { at: Date.now(), account: data });
   return data;
 }
 
@@ -721,22 +735,34 @@ function buildBalance(account) {
   };
 }
 
+async function pickAccountForDisplay() {
+  try {
+    return await pickAccount();
+  } catch (e) {
+    // 全部账号都满了也照常显示（好让 magpie/用户看到 100% 与恢复时间）
+    if (e?.status === 429) return await pickAccount({ preflight: false });
+    throw e;
+  }
+}
+
 async function handleBalance(res) {
-  let session = await loadSession();
+  const picked = await pickAccountForDisplay();
+  let session = picked.account.session;
   if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
-  session = await ensureFresh(session);
-  const balance = buildBalance(await fetchAccount(session));
-  console.log(`[${ts()}] /balance: plan=${balance.plan.code ?? "?"} | ${balance.windows.map((w) => `${w.kind}-${w.id} ${w.usedUsd}/${w.capUsd ?? "∞"}`).join(" , ") || "无窗口"}`);
+  session = await ensureFresh(session, false, picked.account.tokenFile ?? undefined);
+  const balance = buildBalance(await fetchAccount(session, false, picked.account.name));
+  console.log(`[${ts()}] /balance: 账号=${picked.account.name} plan=${balance.plan.code ?? "?"} | ${balance.windows.map((w) => `${w.kind}-${w.id} ${w.usedUsd}/${w.capUsd ?? "∞"}`).join(" , ") || "无窗口"}`);
   sendJson(res, 200, balance);
 }
 
 // magpie 的窗口读取只认 5h / 1d / 7d 三个名字，同名只取第一条、limit<=0 的跳过；
 // 所以这里只交出 manual（手动模型）那组并改名为标准窗口名——它才是会被用满的那组。
 async function handleMagpieUsage(res) {
-  let session = await loadSession();
+  const picked = await pickAccountForDisplay();
+  let session = picked.account.session;
   if (!session?.accessToken) throw httpError(503, "未登录：请先运行 node perch-client.mjs login");
-  session = await ensureFresh(session);
-  const balance = buildBalance(await fetchAccount(session));
+  session = await ensureFresh(session, false, picked.account.tokenFile ?? undefined);
+  const balance = buildBalance(await fetchAccount(session, false, picked.account.name));
   const rate_limits = balance.windows
     .filter((w) => w.kind === "manual" && asNum(w.capUsd) != null && w.capUsd > 0)
     .map((w) => ({
@@ -784,7 +810,11 @@ const server = createServer(async (req, res) => {
       if (!res.headersSent) res.end();
       return;
     }
+    if (e?.errorCode === "usage_limit_reached" || /usage limit|allowance|额度/i.test(String(e?.message ?? ""))) {
+      invalidateUsage(); // 让下一次请求重新读一遍各账号额度
+    }
     const status = e?.errorCode === "turn_rate_limited" ? 429
+      : e?.errorCode === "usage_limit_reached" ? 429
       : e?.errorCode === "turn_ticket_unavailable" ? 502
       : e?.status ?? 500;
     const msg = e?.message ?? String(e);

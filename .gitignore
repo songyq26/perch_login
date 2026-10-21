@@ -3,6 +3,10 @@ token.json
 api-key.txt
 honeypot/.perch/mcp.json
 
+# 多账号：token 与账号名（按需用 accounts.example.json 建自己的）
+accounts/
+accounts.json
+
 # Perch CLI 在本目录生成的本地状态：mcp.json 里会带真实 API key（如 CourtListener 的）
 .perch/
 
