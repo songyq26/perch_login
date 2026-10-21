@@ -1,12 +1,20 @@
 #!/bin/bash
 # Perch 工具箱统一入口（网络全自动：直连优先，失败自动切代理）
 #
-#   ./run.sh login [--provider google|github] [--timeout 300] [--port 8976] [--callback]
+#   ./run.sh login [--account <名字>] [--provider google|github] [--timeout 300] [--port 8976] [--callback]
 #   ./run.sh ask "你的问题" [--model <id或显示名>] [--telemetry]
 #   ./run.sh models [--sync]
+#   ./run.sh migrate [名字]        把现有 token.json 迁成多账号里的一个号（自动建 accounts.json，不重新登录）
+#   ./run.sh accounts [--no-usage] 按优先级列出账号、登录状态、manual 5h/7d 用量
 #   ./run.sh status
 #   ./run.sh gateway [--port 8787] [--host 127.0.0.1|0.0.0.0] [--key auto|<自定义key>]
 #   ./run.sh sync
+#
+# 多账号（除 gateway/sync 外的命令都原样转给 perch-client.mjs）：
+#   · 第一次 ./run.sh login --account <名字> 会自动生成 accounts.json，并把名字追加到末尾（=最低优先级）
+#   · 优先级就是 accounts.json 里 accounts 数组的顺序；autoSwitch=false 则只用一个号、满了直接 429
+#   · 网关每个请求都会重读 accounts.json，改完不用重启；没有该文件时退回单账号 token.json
+#   · token 只写各自账号的 accounts/<名字>/token.json，不会互相覆盖
 #
 # 网络策略（无需手动切换）：
 #   默认    直连探测 → 通：直连；不通：自动切代理（默认 http://127.0.0.1:7890）

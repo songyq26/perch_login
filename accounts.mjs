@@ -31,7 +31,7 @@ export async function loadAccountConfig() {
     const list = Array.isArray(j?.accounts) ? j.accounts : [];
     const accounts = list
       .filter((a) => a && typeof a.name === "string" && a.name.trim())
-      .map((a) => ({ name: a.name.trim(), enabled: a.enabled !== false, note: a.note ?? null }));
+      .map((a) => ({ name: a.name.trim(), enabled: a.enabled !== false, ...(a.note != null ? { note: a.note } : {}) }));
     return {
       accounts,
       usageTtlMs: Number(j?.usageTtlMs) > 0 ? Number(j.usageTtlMs) : DEFAULT_USAGE_TTL_MS,
@@ -50,7 +50,7 @@ export async function saveAccountConfig(cfg) {
 export async function addAccountConfig(name, { enabled = true, note = null } = {}) {
   const cfg = await loadAccountConfig();
   const i = cfg.accounts.findIndex((a) => a.name === name);
-  if (i === -1) cfg.accounts.push({ name, enabled, note });
+  if (i === -1) cfg.accounts.push({ name, enabled, ...(note != null ? { note } : {}) });
   else cfg.accounts[i] = { ...cfg.accounts[i], enabled, ...(note != null ? { note } : {}) };
   await saveAccountConfig(cfg);
   return cfg;

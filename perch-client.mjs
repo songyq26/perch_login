@@ -4,6 +4,7 @@
 //   node perch-client.mjs login [--account <名字>] [--provider google|github] [--timeout 300] [--port 8976] [--callback]
 //   node perch-client.mjs ask "你的问题" [--model <id/显示名/档位[@强度]>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]
 //   node perch-client.mjs models [--sync]
+//   node perch-client.mjs migrate [名字]       把现有 token.json 迁成多账号里的一个号
 //   node perch-client.mjs accounts [--no-usage]
 //   node perch-client.mjs status
 //
@@ -17,9 +18,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import {
   APP_URL, TOKEN_FILE, b64url, fetchAuthConfig, supabaseToken, sessionFromToken,
-  saveSession, saveSessionAt, loadSession, ensureFresh, postJson, callModel, readSSE,
+  saveSession, saveSessionAt, loadSession, loadSessionAt, ensureFresh, postJson, callModel, readSSE,
   createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS,
 } from "./perch-core.mjs";
 import { accountTokenFile, addAccountConfig, listAccounts, fetchAccountUsage, manualWindowState, describeAccount, pickAccount } from "./accounts.mjs";
@@ -338,6 +340,23 @@ async function cmdAsk(args) {
   }
 }
 
+async function cmdMigrate(args) {
+  const name = (args.find((a) => !a.startsWith("--")) ?? "").trim() || "主号";
+  const dest = accountTokenFile(name); // 顺带校验名字
+  if (await loadSessionAt(dest)) throw new Error(`accounts/${name}/token.json 已存在，不覆盖（换个名字，或先删掉它）`);
+  const hasToken = Boolean(await loadSessionAt(TOKEN_FILE));
+  const stateFile = path.join(import.meta.dirname, "state", "token.json");
+  const src = hasToken ? TOKEN_FILE : (await loadSessionAt(stateFile)) ? stateFile : null;
+  if (!src) throw new Error("没有可迁移的会话（token.json / state/token.json 都不存在）：先运行 node perch-client.mjs login");
+  await fs.mkdir(path.dirname(dest), { recursive: true, mode: 0o700 });
+  await fs.rename(src, dest); // 移动而不是复制：同一个 refresh_token 不能留两份
+  await fs.chmod(dest, 0o600).catch(() => {});
+  const cfg = await addAccountConfig(name);
+  const pos = cfg.accounts.findIndex((a) => a.name === name) + 1;
+  console.log(`√ 已把 ${src} 迁移为 accounts/${name}/token.json`);
+  console.log(`  已写入 accounts.json（当前优先级第 ${pos} 位）。以后加号用 login --account <名字>。`);
+}
+
 async function cmdAccounts(args) {
   const withUsage = !args.includes("--no-usage");
   const accounts = await listAccounts();
@@ -408,11 +427,12 @@ const [cmd, ...args] = process.argv.slice(2);
 try {
   if (cmd === "login") await cmdLogin(args);
   else if (cmd === "ask") await cmdAsk(args);
+  else if (cmd === "migrate") await cmdMigrate(args);
   else if (cmd === "accounts") await cmdAccounts(args);
   else if (cmd === "status") await cmdStatus();
   else if (cmd === "models") await cmdModels(args);
   else {
-    console.log('用法:\n  node perch-client.mjs login [--account <名字>] [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器；--account 登录到多账号列表）\n  node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs accounts [--no-usage]\n  node perch-client.mjs status');
+    console.log('用法:\n  node perch-client.mjs login [--account <名字>] [--provider google|github] [--timeout 300] [--port 8976] [--callback]\n    （默认粘贴式登录；--callback 启用本地回调服务器；--account 登录到多账号列表）\n  node perch-client.mjs ask "你的问题" [--model <id/显示名/档位>] [--effort <off|low|medium|high|xhigh|max|ultra>] [--telemetry]\n  node perch-client.mjs models\n  node perch-client.mjs migrate [名字]\n  node perch-client.mjs accounts [--no-usage]\n  node perch-client.mjs status');
     process.exitCode = cmd ? 1 : 0;
   }
 } catch (e) {

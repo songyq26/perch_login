@@ -14,9 +14,20 @@
     { "name": "主号", "enabled": true },
     { "name": "备用", "enabled": true }
   ],
-  "usageTtlMs": 30000
+  "usageTtlMs": 30000,
+  "autoSwitch": true
 }
 ```
+
+**这个文件不用手写**：第一次 `login --account <名字>` 就会自动生成；之后每次加号会自动把名字**追加到末尾**（= 最低优先级），已有条目的位置保持不变。想调优先级就手动挪数组。
+
+已有单账号的可以一键迁移（不重新登录）：
+
+```bash
+./run.sh migrate 主号     # 把现有 token.json 移动成 accounts/主号/token.json，并建 accounts.json
+```
+
+（用"移动"而不是复制：同一个 refresh_token 留两份会互相作废。）
 
 | 字段 | 说明 |
 |---|---|
@@ -30,12 +41,15 @@
 ## 登录
 
 ```bash
-node perch-client.mjs login --account 主号      # 浏览器登录，存到 accounts/主号/token.json
-node perch-client.mjs login --account 备用
+./run.sh login --account 主号      # 浏览器登录，存到 accounts/主号/token.json
+./run.sh login --account 备用
+./run.sh accounts                  # 看顺序与额度
 ```
 
-- `login --account` 会把名字**追加**到 `accounts.json`；已存在的保留原位置（顺序不变）。
-- 不带 `--account` 时仍写 `token.json`（单账号模式）。
+（`node perch-client.mjs ...` 等价；`run.sh` 除 `gateway`/`sync` 外都原样转给它，并自动处理直连/代理。）
+
+- **`accounts.json` 不需要手建**：第一条 `login --account` 自动生成；之后每次加号把名字**追加到末尾**，已有条目的位置不变。
+- 不带 `--account` 时仍写 `token.json`（单账号模式），**不会**碰 `accounts/`。
 - 两个命令都支持 `--provider google|github`、`--callback`（本地回调）。
 
 ## 查看状态
