@@ -3,5 +3,6 @@
     { "name": "主号", "enabled": true },
     { "name": "备用", "enabled": true }
   ],
-  "usageTtlMs": 30000
+  "usageTtlMs": 30000,
+  "autoSwitch": true
 }

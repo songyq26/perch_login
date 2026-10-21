@@ -32,9 +32,14 @@ export async function loadAccountConfig() {
     const accounts = list
       .filter((a) => a && typeof a.name === "string" && a.name.trim())
       .map((a) => ({ name: a.name.trim(), enabled: a.enabled !== false, note: a.note ?? null }));
-    return { accounts, usageTtlMs: Number(j?.usageTtlMs) > 0 ? Number(j.usageTtlMs) : DEFAULT_USAGE_TTL_MS };
+    return {
+      accounts,
+      usageTtlMs: Number(j?.usageTtlMs) > 0 ? Number(j.usageTtlMs) : DEFAULT_USAGE_TTL_MS,
+      // autoSwitch=false：只用序列里第一个可用账号，额度满了就报错，不自动换号（更保守）
+      autoSwitch: j?.autoSwitch !== false,
+    };
   } catch {
-    return { accounts: [], usageTtlMs: DEFAULT_USAGE_TTL_MS };
+    return { accounts: [], usageTtlMs: DEFAULT_USAGE_TTL_MS, autoSwitch: true };
   }
 }
 
@@ -70,6 +75,31 @@ export async function listAccounts() {
 // ---- 额度（manual 窗口） ----
 
 const usageCache = new Map();
+// 撞到 usage_limit_reached 的账号冷却到恢复时间（或 5 分钟）：即使额度接口读不到也不再选它，
+// 免得在已经满额的账号上反复试（那在服务端看来就是"撞限额"）。
+const cooldowns = new Map();
+const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+
+export function markExhausted(name, untilMs = null) {
+  const until = Number.isFinite(untilMs) && untilMs > Date.now() ? untilMs : Date.now() + DEFAULT_COOLDOWN_MS;
+  cooldowns.set(name, until);
+  usageCache.delete(name);
+  return until;
+}
+
+export function cooldownUntil(name) {
+  const until = cooldowns.get(name) ?? 0;
+  if (until <= Date.now()) {
+    cooldowns.delete(name);
+    return null;
+  }
+  return until;
+}
+
+export function clearCooldown(name) {
+  if (name == null) cooldowns.clear();
+  else cooldowns.delete(name);
+}
 
 export function invalidateUsage(name) {
   if (name == null) usageCache.clear();
@@ -119,8 +149,9 @@ export function manualWindowState(data) {
  * preflight=true 时会读额度并跳过 manual 窗口已满的账号；全部满 → 抛 status=429。
  */
 export async function pickAccount({ preflight = true } = {}) {
+  const cfg = await loadAccountConfig();
   const accounts = await listAccounts();
-  const usable = accounts.filter((a) => a.enabled && a.session);
+  let usable = accounts.filter((a) => a.enabled && a.session);
   if (!usable.length) {
     const err = new Error(accounts.length
       ? `没有可用账号（${accounts.map((a) => `${a.name}${a.enabled ? " 未登录" : " 已禁用"}`).join("、")}）；先运行 node perch-client.mjs login --account <名字>`
@@ -128,8 +159,14 @@ export async function pickAccount({ preflight = true } = {}) {
     err.status = 503;
     throw err;
   }
+  if (!cfg.autoSwitch) usable = usable.slice(0, 1); // autoSwitch=false：只看序列里第一个可用账号
   const skipped = [];
   for (const account of usable) {
+    const cooling = cooldownUntil(account.name);
+    if (cooling) {
+      skipped.push(`${account.name}（已撞额度，冷却到 ${new Date(cooling).toISOString()}）`);
+      continue;
+    }
     if (!preflight) return { account, usage: null, state: null, skipped };
     let usage;
     try {
@@ -143,7 +180,9 @@ export async function pickAccount({ preflight = true } = {}) {
     if (!state.enabled || !state.exhausted) return { account, usage, state, skipped };
     skipped.push(`${account.name}（manual ${state.reason}，最早恢复 ${state.nextFreedAt ?? "未知"}）`);
   }
-  const err = new Error(`所有账号的 manual 额度窗口都已用尽：${skipped.join("；")}`);
+  const err = new Error(cfg.autoSwitch
+    ? `所有账号的 manual 额度窗口都已用尽：${skipped.join("；")}`
+    : `当前账号额度已用尽（accounts.json autoSwitch=false，不自动换号）：${skipped.join("；")}`);
   err.status = 429;
   err.skipped = skipped;
   throw err;

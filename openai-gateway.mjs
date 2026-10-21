@@ -37,7 +37,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, ROOST_EFFORT_LEVELS } from "./perch-core.mjs";
-import { pickAccount, describeAccount, invalidateUsage } from "./accounts.mjs";
+import { pickAccount, describeAccount, invalidateUsage, markExhausted } from "./accounts.mjs";
 import { syncIfStale } from "./sync-models.mjs";
 
 const args = process.argv.slice(2);
@@ -479,7 +479,10 @@ async function handleChatCompletions(req, res) {
     if (streamError) throw httpError(502, `上游流错误：${streamError}`);
     if (doneEv?.ok === false) {
       const code = doneEv.errorCode;
-      if (code === "usage_limit_reached") invalidateUsage(picked.account.name);
+      if (code === "usage_limit_reached") {
+        const until = picked.state?.nextFreedAt ? Date.parse(picked.state.nextFreedAt) : null;
+        markExhausted(picked.account.name, until); // 冷却到恢复时间，避免在下个请求里再撞它
+      }
       throw httpError(code === "usage_limit_reached" ? 429 : 502, `上游失败：${doneEv.error ?? code ?? "unknown"}`);
     }
     const message = { role: "assistant", content: text || null };
@@ -539,8 +542,11 @@ async function handleChatCompletions(req, res) {
   if (streamError) {
     send({ error: { message: streamError, type: "upstream_error" } });
   } else if (doneEv?.ok === false) {
-    // 额度用尽：把该账号的额度缓存作废，下一次请求预检就会跳过它
-    if (doneEv.errorCode === "usage_limit_reached") invalidateUsage(picked.account.name);
+    // 额度用尽：冷却该账号（到恢复时间或 5 分钟），下一次请求预检就会跳过它
+    if (doneEv.errorCode === "usage_limit_reached") {
+      const until = picked.state?.nextFreedAt ? Date.parse(picked.state.nextFreedAt) : null;
+      markExhausted(picked.account.name, until);
+    }
     send({ error: { message: String(doneEv.error ?? doneEv.errorCode ?? "upstream failed"), type: "upstream_error" } });
   } else {
     if (toolCalls.length) chunk({ tool_calls: toOpenAIToolCalls(toolCalls) });
