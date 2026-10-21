@@ -96,6 +96,30 @@ node perch-client.mjs accounts --no-usage # 只看配置，不请求额度
 - 不要为了"多号并行刷"去提高并发：服务端有每轮速率（L3），跨号并发在风控视角更像是账号池。
 - 出现 `turn_rate_limited` / `usage_limit_reached` 时**等窗口滚动**，不要靠加号或加并发硬顶。
 
+## token 会被覆盖吗？不会
+
+| 场景 | 写到哪 |
+|---|---|
+| `login --account 主号` | **只写** `accounts/主号/token.json` |
+| `login`（不带 `--account`） | 只写 `token.json`（单账号），**不碰** `accounts/` 下任何文件 |
+| 网关里 token 过期自动刷新 | 显式带上该账号的文件：对话 / `/balance` / `/v1/usage` / 额度预检 / **model-call 的 401 重试**，全部只写回 `accounts/<该账号>/token.json` |
+| `ask` 命令 | 有 `accounts.json` 时按优先级选号，刷新同样只写该号的文��� |
+
+实测（把两个号的 token 都设成过期，触发真实刷新路径）：
+
+```
+刷新 a: → new-access-rt-a      写回 accounts/a/token.json
+刷新 b: → new-access-rt-b      写回 accounts/b/token.json
+token.json                    不存在 ✓（没有被创建/覆盖）
+```
+
+要点：
+
+- **同一账号**被多进程同时刷新：`~/.perch/cli-auth-refresh.lock` 文件锁串行化，锁内会二次读文件，采用别人刚刷新好的结果，不会重复轮换。
+- **不同账号**刷新互相独立：各自的文件、各自在内存里的 in-flight 去重 key（按 `appUrl::userId` 区分）。
+- 已知的**极小竞态**：同时跑两个 `login --account` 时，`accounts.json` 是"读-改-写"，理论上可能丢一条记录（交互式登录很难同时发生；丢了手工补一行即可，token 文件本身不受影响）。
+- 旧脚本 `perch_login.mjs` 是独立入口，只写 `state/token.json`，不参与多账号。
+
 ## 注意
 
 - `accounts/` 和 `accounts.json` 已在 `.gitignore`（token 与个人信息都不入库）。

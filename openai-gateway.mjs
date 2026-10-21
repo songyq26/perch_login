@@ -460,7 +460,7 @@ async function handleChatCompletions(req, res) {
     ac.abort();
   });
 
-  const { res: up } = await callModel(session, await tickets.headers(), perchBody, ac.signal);
+  const { res: up } = await callModel(session, await tickets.headers(), perchBody, ac.signal, picked.account.tokenFile ?? null);
   upHeadAt = Date.now();
   console.log(`[${ts()} #${reqId}] 上游响应头 ${upHeadAt - started}ms（HTTP ${up.status}）`);
   const ct = up.headers.get("content-type") ?? "";

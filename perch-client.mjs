@@ -22,7 +22,7 @@ import {
   saveSession, saveSessionAt, loadSession, ensureFresh, postJson, callModel, readSSE,
   createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS,
 } from "./perch-core.mjs";
-import { accountTokenFile, addAccountConfig, listAccounts, fetchAccountUsage, manualWindowState, describeAccount } from "./accounts.mjs";
+import { accountTokenFile, addAccountConfig, listAccounts, fetchAccountUsage, manualWindowState, describeAccount, pickAccount } from "./accounts.mjs";
 import { syncModels } from "./sync-models.mjs";
 
 const CALLBACK_PATH = "/callback";
@@ -237,9 +237,13 @@ async function cmdAsk(args) {
     throw new Error("--effort 需要配合 Roost 档位使用（官方语义里 effort 属于档位选择），例如：--model pro --effort max");
   }
 
-  let session = await loadSession();
+  // 有 accounts.json 时按优先级选号；没有则退回单账号
+  const picked = await pickAccount();
+  let session = picked.account.session;
   if (!session?.accessToken) throw new Error("没有可用会话，请先运行: node perch-client.mjs login");
-  session = await ensureFresh(session);
+  session = await ensureFresh(session, false, picked.account.tokenFile ?? undefined);
+  if (picked.skipped?.length) console.log(`账号: ${describeAccount(picked)} | 跳过: ${picked.skipped.join("；")}`);
+  else console.log(`账号: ${describeAccount(picked)}`);
 
   const auth = { Authorization: `Bearer ${session.accessToken}` };
 
@@ -278,7 +282,7 @@ async function cmdAsk(args) {
     clientSurface: "cli",
   };
 
-  const { res } = await callModel(session, await tickets.headers(), body);
+  const { res } = await callModel(session, await tickets.headers(), body, undefined, picked.account.tokenFile ?? null);
   const ct = res.headers.get("content-type") ?? "";
   if (!ct.includes("text/event-stream")) {
     const raw = await res.text().catch(() => "");

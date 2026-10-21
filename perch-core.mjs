@@ -433,7 +433,7 @@ export function createTicketManager() {
   };
 }
 
-export async function callModel(session, ticketHeaders, body, signal) {
+export async function callModel(session, ticketHeaders, body, signal, tokenFile = null) {
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     let res;
@@ -460,7 +460,7 @@ export async function callModel(session, ticketHeaders, body, signal) {
     if (res.status === 401) {
       await res.body?.cancel().catch(() => {});
       if (attempt === 0) {
-        try { session = await ensureFresh(session, true); } catch {}
+        try { session = await ensureFresh(session, true, tokenFile); } catch {}
         continue;
       }
       return { res, session };
