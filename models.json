@@ -1,6 +1,6 @@
 {
-  "extractedAt": "2026-10-14T02:08:47.356Z",
-  "cliVersion": "2.4.108",
+  "extractedAt": "2026-10-21T08:05:55.036Z",
+  "cliVersion": "2.4.109",
   "source": "/Users/songyunqi123/.nvm/versions/node/v22.23.2/lib/node_modules/perchai-cli/dist/perch.mjs",
   "models": [
     {
@@ -225,7 +225,6 @@
       "effort": {
         "kind": "graded",
         "levels": [
-          "none",
           "low",
           "medium",
           "high",
@@ -252,7 +251,7 @@
           "high"
         ]
       },
-      "vision": true,
+      "vision": false,
       "manualOnly": true
     },
     {
@@ -279,19 +278,11 @@
       "name": "deepseek-v4.1-flash",
       "id": "dashscope-deepseek-v4-1-flash",
       "label": "DeepSeek V4.1 Flash",
-      "contextWindow": 1000000,
-      "maxOutputTokens": 393216,
-      "reasoning": true,
-      "effort": {
-        "kind": "graded",
-        "levels": [
-          "low",
-          "high",
-          "max"
-        ]
-      },
-      "vision": true,
-      "manualOnly": true
+      "contextWindow": null,
+      "maxOutputTokens": null,
+      "reasoning": null,
+      "effort": null,
+      "vision": null
     },
     {
       "group": "pro",
@@ -351,11 +342,11 @@
       "name": "minimax-m3",
       "id": "wandb-minimax-m3",
       "label": "MiniMax M3",
-      "contextWindow": 262000,
+      "contextWindow": null,
       "maxOutputTokens": null,
-      "reasoning": true,
+      "reasoning": null,
       "effort": null,
-      "vision": true
+      "vision": null
     },
     {
       "group": "pro",
@@ -386,11 +377,11 @@
       "name": "deepseek-v4",
       "id": "wandb-deepseek-ai-deepseek-v4-pro",
       "label": "DeepSeek V4 Pro 0813",
-      "contextWindow": 1040000,
+      "contextWindow": null,
       "maxOutputTokens": null,
-      "reasoning": true,
+      "reasoning": null,
       "effort": null,
-      "vision": false
+      "vision": null
     },
     {
       "group": "pro",
@@ -428,11 +419,11 @@
       "name": "kimi-2.7",
       "id": "wandb-kimi-k2-7-code",
       "label": "Kimi K2.7 Code",
-      "contextWindow": 262144,
+      "contextWindow": null,
       "maxOutputTokens": null,
-      "reasoning": true,
+      "reasoning": null,
       "effort": null,
-      "vision": true
+      "vision": null
     },
     {
       "group": "pro",
