@@ -45,6 +45,19 @@ TSe: PERCH_CLI_APP_URL || PERCH_APP_URL || ""
 | `x-perch-call-delta` | `1` | 硬编码（2.4.113+） | **总是**（首轮 body 是完整 `request` 也照发） |
 | `x-perch-locale` | `en`（默认） | `p0t = "x-perch-locale"` | 2.4.113+：`cli-context` / `perchai/account` / `turn-ticket` / `model-call` |
 
+**hosted model-call 的 surface 判据（实测 2026-10-23，逐项二分）**：
+
+请求的 `messages` 里**必须有一条 `role: "system"`**（`developer` 不算）。没有 → 服务端返回
+**403 `perch_surface_required`**："Your plan includes Perch-hosted models for use in Perch AI Web,
+Desktop, and CLI only. Direct API access is not included."
+
+逐项验证过、**不是**判据的：UA 版本（unknown / 2.4.109 / 2.4.113 都一样）、`tools` 有无、
+`max_tokens` 大小、`avoidModelIds` 空或 28 条、`x-perch-call-delta` / `x-perch-locale` / ticket
+（我们的票与官方 claims 完全一致）、`request.lane`。
+同一份官方 body 用我们的传输重放 → 200；只把 messages 换成"单条 user"→ 403；加回一条短 system → 200。
+
+网关因此默认在客户端没发 system 时补一条中性提示（`PERCH_DEFAULT_SYSTEM` 可改，设为空串关闭补全）。
+
 **2.4.113 的"对话增量"协议**（蜜罐实测，2026-10-23）：
 
 - 响应头带 `x-perch-call-delta: 1` + `x-perch-call-held-length`（服务端已持有的消息条数）、

@@ -52,6 +52,9 @@ const MAX_TOKENS_CAP = 32000;
 // 间隔恒定），客户端只拿它续命、不当内容——推理阶段是全程静默的，没有它客户端会被空闲超时误杀。
 // 本网关默认收紧到 5s（比官方密，纯本地行为、不额外消耗额度），PERCH_KEEPALIVE_MS=0 可关闭。
 const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 5000);
+// Perch 的 hosted model-call 要求请求里必须有 system 消息（实测：没有就 403 perch_surface_required）。
+// 客户端没发时补这一条；设成空字符串可关闭补全（那样无 system 的请求会照实 403）。
+const DEFAULT_SYSTEM = process.env.PERCH_DEFAULT_SYSTEM ?? "You are a helpful assistant.";
 // pin/自动路由的 effort 转发：默认开启（实测服务端会采纳这个组合；官方 CLI 不发送它）
 // 关闭方式：PERCH_FORWARD_PIN_EFFORT=0
 const FORWARD_PIN_EFFORT = !["0", "false", "off"].includes(String(process.env.PERCH_FORWARD_PIN_EFFORT ?? "").trim().toLowerCase());
@@ -358,11 +361,19 @@ async function handleChatCompletions(req, res) {
   const modelLabel = requestedModel;
   const messages = normalizeMessages(Array.isArray(body.messages) ? body.messages : []);
   if (messages.length === 0) throw httpError(400, "messages 不能为空");
+  // developer 是 OpenAI 新版对 system 的别名，Perch 只认 system；两者都没有就补一条默认的
+  for (const m of messages) if (m.role === "developer") m.role = "system";
+  let systemInjected = false;
+  if (DEFAULT_SYSTEM && !messages.some((m) => m.role === "system")) {
+    messages.unshift({ role: "system", content: DEFAULT_SYSTEM });
+    systemInjected = true;
+  }
   const tools = Array.isArray(body.tools) && body.tools.length > 0 ? body.tools : undefined;
   const toolChoice = tools ? mapToolChoice(body.tool_choice) : null;
   const rawMax = Number(body.max_tokens ?? body.max_completion_tokens ?? MAX_TOKENS_CAP);
   const maxTokens = Math.min(Math.max(Number.isFinite(rawMax) ? rawMax : MAX_TOKENS_CAP, 1), MAX_TOKENS_CAP);
   const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
+  if (systemInjected) console.log(`[${ts()} #${reqId}] 客户端没发 system 消息 → 已补默认值（Perch hosted 要求；PERCH_DEFAULT_SYSTEM 可改/清空关闭）`);
 
   const picked = await pickAccount();
   const accountLabel = describeAccount(picked);
@@ -392,7 +403,7 @@ async function handleChatCompletions(req, res) {
 
   const perchBody = {
     request: {
-      lane: "chat",
+      // 官方 2.4.113 的 request 里没有 lane（lane 只在顶层）——多出来的字段会被严格校验看到
       messages,
       ...(tools ? { tools } : {}),
       temperature,

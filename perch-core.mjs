@@ -6,7 +6,9 @@ import path from "node:path";
 
 export const APP_URL = (process.env.PERCH_CLI_APP_URL || process.env.PERCH_APP_URL || "https://app.perchai.app").replace(/\/+$/, "");
 export const TOKEN_FILE = path.join(import.meta.dirname, "token.json");
-export const UA = "perchai-cli/unknown";
+// 与官方 bin/perch 一致：版本来自 PERCH_CLI_VERSION（官方启动器从已安装的 package.json 注入），
+// 缺失时回退 unknown。不写死、不伪造与安装不符的版本。
+export const UA = `perchai-cli/${process.env.PERCH_CLI_VERSION?.trim() || "unknown"}`;
 // 官方 2.4.113 起在 cli-context / account / turn-ticket / model-call 上带 locale；
 // model-call 另外固定带 x-perch-call-delta: 1（能力声明：首轮 body 是完整 request 也照发）
 export const LOCALE = process.env.PERCH_LOCALE?.trim() || "en";
