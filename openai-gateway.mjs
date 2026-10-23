@@ -38,6 +38,7 @@
 
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -63,6 +64,39 @@ const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 5000);
 // Perch 的 hosted model-call 要求请求里必须有 system 消息（实测：没有就 403 perch_surface_required）。
 // 客户端没发时补这一条；设成空字符串可关闭补全（那样无 system 的请求会照实 403）。
 const DEFAULT_SYSTEM = process.env.PERCH_DEFAULT_SYSTEM ?? "You are a helpful assistant.";
+// system 固定策略：Perch 按 system 内容判 surface —— 换一个 agent 就会带上它自己的自报名，
+// 于是又 403（实测 "You are Kimi Code CLI" → 403，中性文案 → 200）。
+// 官方客户端那份 system 是 5.2 万字的人格+产品文档（perch-system-prompt.txt，蜜罐抓的真实 body），
+// 拿它当固定值会让模型扮演 Saffron 并引用 Perch 专属能力（skill/browser/Desktop），和第三方 agent
+// 的工具对不上，实测还会把首字拖到 175s 以上——所以默认固定成一句中性文案，而不是那份长文。
+//   fixed（默认）：整条 system 换成 PERCH_FIXED_SYSTEM（一句中性文案），客户端原文丢弃
+//   perch：整条换成官方那份 5.2 万字原文（要完全照抄官方时才用）
+//   merge：固定文案在前 + 客户端 system 接在后（先抹身份），保留 agent 自己的指令
+//   scrub：只抹身份、保留客户端原文
+//   off：原样转发
+const SYSTEM_MODE = String(process.env.PERCH_SYSTEM_MODE ?? "fixed").trim().toLowerCase();
+const FIXED_SYSTEM = process.env.PERCH_FIXED_SYSTEM ?? DEFAULT_SYSTEM;
+const SYSTEM_PROMPT_FILE = process.env.PERCH_SYSTEM_PROMPT_FILE ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "perch-system-prompt.txt");
+const OFFICIAL_SYSTEM = await (async () => {
+  try {
+    const t = (await fs.readFile(SYSTEM_PROMPT_FILE, "utf8")).trim();
+    return t.length > 0 ? t : null;
+  } catch {
+    return null;
+  }
+})();
+// 选定的模式不可用时退到能工作的那个：perch 需要文件，fixed 需要文案。
+const EFFECTIVE_SYSTEM_MODE = (() => {
+  if (SYSTEM_MODE === "perch") return OFFICIAL_SYSTEM ? "perch" : (FIXED_SYSTEM ? "fixed" : "scrub");
+  if (SYSTEM_MODE === "fixed") return FIXED_SYSTEM ? "fixed" : "scrub";
+  if (SYSTEM_MODE === "merge") {
+    const base = OFFICIAL_SYSTEM ?? FIXED_SYSTEM;
+    return base ? "merge" : "scrub";
+  }
+  return SYSTEM_MODE === "off" ? "off" : "scrub";
+})();
+// 替换模式下实际用来顶替的那段文字
+const REPLACEMENT_SYSTEM = EFFECTIVE_SYSTEM_MODE === "perch" ? OFFICIAL_SYSTEM : FIXED_SYSTEM;
 // Perch 还会按 system 消息里的"客户端自报名"判 surface（实测二分：`You are Kimi Code CLI.` → 403
 // perch_surface_required，`You are Kimi Code.` / `You are a helpful assistant.` / `for Kimi users` → 200）。
 // 外发前把这些自报名抹成中性说法，其余提示词原样保留。PERCH_SCRUB_IDENTITY=0 关闭。
@@ -406,16 +440,34 @@ async function handleChatCompletions(req, res) {
     systemFlattened = true;
   }
   let systemInjected = false;
-  if (DEFAULT_SYSTEM && !messages.some((m) => m.role === "system")) {
-    messages.unshift({ role: "system", content: DEFAULT_SYSTEM });
-    systemInjected = true;
-  }
   let scrubHits = 0;
-  if (SCRUB_IDENTITY && typeof messages[0]?.content === "string") {
-    const r = scrubIdentity(messages[0].content);
-    if (r.hits > 0) {
-      messages[0].content = r.text;
-      scrubHits = r.hits;
+  let systemNote = "";
+  if (EFFECTIVE_SYSTEM_MODE === "fixed" || EFFECTIVE_SYSTEM_MODE === "perch" || EFFECTIVE_SYSTEM_MODE === "merge") {
+    // 收集客户端本来发的所有 system（可能是多条），后面要么丢掉、要么接在固定文案后面
+    const clientSystems = messages.filter((m) => m.role === "system").map((m) => flattenText(m.content));
+    let tail = "";
+    if (EFFECTIVE_SYSTEM_MODE === "merge") {
+      const parts = clientSystems.map((t) => scrubIdentity(t));
+      scrubHits = parts.reduce((n, p) => n + p.hits, 0);
+      tail = parts.map((p) => p.text).filter((t) => t.trim()).join("\n\n");
+    }
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "system") messages.splice(i, 1);
+    const content = tail ? `${REPLACEMENT_SYSTEM}\n\n${tail}` : REPLACEMENT_SYSTEM;
+    messages.unshift({ role: "system", content });
+    systemInjected = clientSystems.length === 0;
+    const src = EFFECTIVE_SYSTEM_MODE === "perch" ? "官方原文" : "固定文案";
+    systemNote = `system 固定为${src} ${REPLACEMENT_SYSTEM.length} 字（模式 ${EFFECTIVE_SYSTEM_MODE}${clientSystems.length === 0 ? "，客户端没发 system" : tail ? `，另接客户端原文 ${tail.length} 字` : `，客户端原文 ${clientSystems.reduce((n, t) => n + t.length, 0)} 字已丢弃`}）`;
+  } else {
+    if (DEFAULT_SYSTEM && !messages.some((m) => m.role === "system")) {
+      messages.unshift({ role: "system", content: DEFAULT_SYSTEM });
+      systemInjected = true;
+    }
+    if (SCRUB_IDENTITY && typeof messages[0]?.content === "string") {
+      const r = scrubIdentity(messages[0].content);
+      if (r.hits > 0) {
+        messages[0].content = r.text;
+        scrubHits = r.hits;
+      }
     }
   }
   if (systemMoved || systemFlattened) {
@@ -435,7 +487,8 @@ async function handleChatCompletions(req, res) {
     console.log(`[${ts()} #${reqId}] max_tokens: 请求 ${requestedMax} → 实际 ${maxTokens}（模型上限 ${Number.isFinite(modelCap) ? modelCap : "?"}${ctxCap < Infinity ? `，上下文余量 ${ctxCap}` : ""}，硬顶 ${MAX_TOKENS_CEILING}）`);
   }
   const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
-  if (systemInjected) console.log(`[${ts()} #${reqId}] 客户端没发 system 消息 → 已补默认值（Perch hosted 要求；PERCH_DEFAULT_SYSTEM 可改/清空关闭）`);
+  if (systemNote) console.log(`[${ts()} #${reqId}] ${systemNote}`);
+  else if (systemInjected) console.log(`[${ts()} #${reqId}] 客户端没发 system 消息 → 已补默认值（Perch hosted 要求；PERCH_DEFAULT_SYSTEM 可改/清空关闭）`);
   if (scrubHits > 0) {
     const head = messages[0].content.slice(0, 120).replace(/\s+/g, " ");
     console.log(`[${ts()} #${reqId}] 身份抹除: ${scrubHits} 处（Perch 按 system 内容判 surface）→ "${head}…"`);
@@ -933,6 +986,7 @@ server.listen(PORT, HOST, () => {
     console.log(`  API key 鉴权：未开启（本地端口谁都能访问；用 ./run.sh gateway --key auto 生成并启用）`);
   }
   console.log(`  pin/自动路由 effort 转发：${FORWARD_PIN_EFFORT ? "已开启（默认；PERCH_FORWARD_PIN_EFFORT=0 可关闭）" : "已关闭（仅档位请求携带 effort）"}`);
+  console.log(`  system 固定策略：${EFFECTIVE_SYSTEM_MODE}（顶替文案 ${REPLACEMENT_SYSTEM ? `${REPLACEMENT_SYSTEM.length} 字` : "无"}${EFFECTIVE_SYSTEM_MODE === "perch" ? `，读自 ${path.basename(SYSTEM_PROMPT_FILE)}` : ""}）；PERCH_SYSTEM_MODE=fixed|perch|merge|scrub|off 可改`);
   const isLoopback = HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1";
   if (!isLoopback) {
     console.warn("  ⚠️ 监听在非本机地址（对外提供服务）：");

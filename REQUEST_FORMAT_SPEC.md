@@ -61,14 +61,28 @@ system prompt 里出现第三方 agent 的产品身份（实测 `"You are Kimi C
 `"You are Kimi Code."` → 200；`"You are a helpful assistant."` → 200）同样返回
 `perch_surface_required`。也就是说这是**服务端对第三方 agent 的策略拦截**，不是协议缺口。
 
-网关的做法：**外发前把 system 消息里的客户端自报名抹成中性说法**（`You are Kimi Code CLI, …` →
-`You are the CLI, …`；单独的 `Kimi Code CLI` / `Kimi Code` → `the CLI`），其余提示词原样保留，
-只动第一条 system、命中时打日志。`Kimi` 单词本身不触发，所以不单独删。开关 `PERCH_SCRUB_IDENTITY=0`；
-属于规避策略，服务端哪天放行就可以关掉。
+网关的做法：**外发前把整条 system 换成一段固定文案**（默认 `fixed`，文案是一句
+`You are a helpful assistant.`，`PERCH_FIXED_SYSTEM` 可改）。这样换任何 agent 都不会因为它的
+system 自报名被拦，代价是 agent 自己的 system 指令不再发给上游。
 
-网关因此默认在客户端没发 system 时补一条中性提示（`PERCH_DEFAULT_SYSTEM` 可改，设为空串关闭补全）。
+模式（`PERCH_SYSTEM_MODE`）：
+- `fixed`（默认）：整条替换成固定文案，客户端 system 丢弃，日志记 `xx 字已丢弃`
+- `merge`：固定文案在前 + 客户端 system 接在后（先抹身份），保留 agent 指令
+- `scrub`：只抹身份、保留客户端原文（`You are Kimi Code CLI` → `You are the CLI` 等；`Kimi`
+  单词本身不触发，不单独删）；`PERCH_SCRUB_IDENTITY=0` 关闭
+- `perch`：整条换成官方客户端那份 5.2 万字原文（`perch-system-prompt.txt`）
+- `off`：原样转发
+
+关于那份官方原文（蜜罐抓的真实 body，共 5 份样本，长度 51629～52494 字）：它不是一句身份声明，
+而是 Saffron 人格（约 8k）+ Perch 产品事实文档（约 20k）+ skills 说明（约 10k），里面提到
+`Perch Desktop` 8 次、`skill` 28 次、`browser` 19 次。把它当固定 system 会让模型扮演 Perch 的
+运营人格、引用 Perch 专属能力，与第三方 agent 的工具集不一致；实测同一模型同一问题，用它时
+上游 175s 不吐首字，用 28 字固定文案时 4.0s 出首字节、13.8s 结束。所以默认不用它，只在 `perch`
+模式下可选。
+
 实测（2026-10-23，经网关）：带 `"You are Kimi Code CLI, …"` 与 `"You are Kimi Code CLI headless."`
-均 200，日志记 `身份抹除: 1 处`；同一份落盘 body 原样重放（不经网关）仍 403。
+均 200（`scrub` 模式，日志记 `身份抹除: 1 处`）；带第三方 CLI 自报名的 system 在 `fixed` 模式下
+200（日志记 `客户端原文 67 字已丢弃`）；同一份落盘 body 原样重放（不经网关）仍 403。
 
 **2.4.113 的"对话增量"协议**（蜜罐实测，2026-10-23）：
 
