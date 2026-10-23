@@ -40,6 +40,7 @@ import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, ROOST_EFFORT_LEVELS, LOCALE_HEADER } from "./perch-core.mjs";
 import { pickAccount, describeAccount, invalidateUsage, markExhausted } from "./accounts.mjs";
 import { syncIfStale } from "./sync-models.mjs";
@@ -368,12 +369,31 @@ async function handleChatCompletions(req, res) {
   const modelLabel = requestedModel;
   const messages = normalizeMessages(Array.isArray(body.messages) ? body.messages : []);
   if (messages.length === 0) throw httpError(400, "messages 不能为空");
-  // developer 是 OpenAI 新版对 system 的别名，Perch 只认 system；两者都没有就补一条默认的
+  // 诊断：Perch 的 surface 判据看 system 消息；把客户端原始形状打出来（角色/内容类型）
+  const roleSig = messages.map((m) => `${m.role}:${typeof m.content === "string" ? "str" : Array.isArray(m.content) ? "arr" : typeof m.content}`);
+  console.log(`[${ts()} #${reqId}] 消息角色: ${roleSig.join(" → ")}`);
+  // developer 是 OpenAI 新版对 system 的别名，Perch 只认 system
   for (const m of messages) if (m.role === "developer") m.role = "system";
+  // 官方请求里 system 永远是第一条、且内容是纯文本：把它挪到最前并拍平
+  const sysAt = messages.findIndex((m) => m.role === "system");
+  let systemMoved = false;
+  if (sysAt > 0) {
+    messages.unshift(...messages.splice(sysAt, 1));
+    systemMoved = true;
+  }
+  const flattenText = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => (typeof p === "string" ? p : p?.text ?? "")).join("") : String(c ?? ""));
+  let systemFlattened = false;
+  if (messages[0]?.role === "system" && typeof messages[0].content !== "string") {
+    messages[0].content = flattenText(messages[0].content);
+    systemFlattened = true;
+  }
   let systemInjected = false;
   if (DEFAULT_SYSTEM && !messages.some((m) => m.role === "system")) {
     messages.unshift({ role: "system", content: DEFAULT_SYSTEM });
     systemInjected = true;
+  }
+  if (systemMoved || systemFlattened) {
+    console.log(`[${ts()} #${reqId}] system 规范化: ${systemMoved ? `从第 ${sysAt} 条挪到最前` : ""}${systemMoved && systemFlattened ? "、" : ""}${systemFlattened ? "内容拍平为纯文本" : ""}`);
   }
   const tools = Array.isArray(body.tools) && body.tools.length > 0 ? body.tools : undefined;
   const toolChoice = tools ? mapToolChoice(body.tool_choice) : null;
@@ -494,6 +514,13 @@ async function handleChatCompletions(req, res) {
   const ct = up.headers.get("content-type") ?? "";
   if (!ct.includes("text/event-stream")) {
     const raw = await up.text().catch(() => "");
+    if (up.status === 403 && process.env.PERCH_DUMP_403 === "1") {
+      // 诊断（默认关闭，PERCH_DUMP_403=1 开启）：把这次真正发出去的 body 落盘，便于原样重放/二分。
+      // 注意：文件含你自己的会话内容，只存在本机临时目录。
+      const dump = path.join(os.tmpdir(), `perch-403-${Date.now()}.json`);
+      await fs.writeFile(dump, JSON.stringify(perchBody, null, 2)).catch(() => {});
+      console.warn(`[${ts()} #${reqId}] 上游 403，已把外发 body 存到 ${dump}`);
+    }
     throw httpError(up.status === 200 ? 502 : up.status, `上游返回非 SSE（HTTP ${up.status}）：${raw.slice(0, 200)}`);
   }
 

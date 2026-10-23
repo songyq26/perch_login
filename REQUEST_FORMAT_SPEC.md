@@ -56,6 +56,12 @@ Desktop, and CLI only. Direct API access is not included."
 （我们的票与官方 claims 完全一致）、`request.lane`。
 同一份官方 body 用我们的传输重放 → 200；只把 messages 换成"单条 user"→ 403；加回一条短 system → 200。
 
+**附加发现（2026-10-23，二分到具体字符串）**：system 消息的**内容**也会被检查 ——
+system prompt 里出现第三方 agent 的产品身份（实测 `"You are Kimi Code CLI."` → 403；
+`"You are Kimi Code."` → 200；`"You are a helpful assistant."` → 200）同样返回
+`perch_surface_required`。也就是说这是**服务端对第三方 agent 的策略拦截**，不是协议缺口：
+把客户端自己的身份从 system prompt 里抹掉属于规避该策略，不应在网关里做。
+
 网关因此默认在客户端没发 system 时补一条中性提示（`PERCH_DEFAULT_SYSTEM` 可改，设为空串关闭补全）。
 
 **2.4.113 的"对话增量"协议**（蜜罐实测，2026-10-23）：
