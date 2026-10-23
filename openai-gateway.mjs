@@ -10,6 +10,10 @@
 // 会作为 preferredModelId 上报。tools / tool_choice / tool_calls 按 OpenAI 格式
 // 透传，工具执行在客户端（你的 agent）完成，与官方 CLI 的分工一致。
 //
+// max_tokens：官方语义是 requested ?? 32000，再与"模型的 maxOutputTokens"和"上下文余量
+// （contextWindow - 输入估算 - 1000）取小；本网关另加 PERCH_MAX_TOKENS_CAP 硬顶（默认 128000）。
+// 被压小时日志会打一行 `max_tokens: 请求 X → 实际 Y（…）`。
+//
 // 与 OpenAI 协议的已知差异（上游决定）：工具调用参数不做增量流式（在
 // tool_use_end/done 后整段下发）；reasoning_delta 映射为 delta.reasoning_content
 // （非标准扩展字段）；stream_restart 无法在 OpenAI 协议里表达回滚。
@@ -47,7 +51,10 @@ const flagValue = (name) => {
 };
 const PORT = Number(process.env.PORT ?? flagValue("--port") ?? 8787);
 const HOST = flagValue("--host") ?? process.env.HOST ?? "127.0.0.1";
-const MAX_TOKENS_CAP = 32000;
+// max_tokens 的硬顶（防止离谱值）；实际值还会被"该模型的 maxOutputTokens"和"上下文余量"压小。
+// 官方逻辑：requested ?? 32000，再与 contextWindow - input - 1000 取小。
+const MAX_TOKENS_CEILING = Number(process.env.PERCH_MAX_TOKENS_CAP ?? 128000);
+const DEFAULT_MAX_TOKENS = 32000;
 // SSE 心跳：官方 Perch 在 /model-call 上每 15.00s 发一行 `: keepalive` 注释（实测 181s 里 13 个，
 // 间隔恒定），客户端只拿它续命、不当内容——推理阶段是全程静默的，没有它客户端会被空闲超时误杀。
 // 本网关默认收紧到 5s（比官方密，纯本地行为、不额外消耗额度），PERCH_KEEPALIVE_MS=0 可关闭。
@@ -370,8 +377,17 @@ async function handleChatCompletions(req, res) {
   }
   const tools = Array.isArray(body.tools) && body.tools.length > 0 ? body.tools : undefined;
   const toolChoice = tools ? mapToolChoice(body.tool_choice) : null;
-  const rawMax = Number(body.max_tokens ?? body.max_completion_tokens ?? MAX_TOKENS_CAP);
-  const maxTokens = Math.min(Math.max(Number.isFinite(rawMax) ? rawMax : MAX_TOKENS_CAP, 1), MAX_TOKENS_CAP);
+  const rawMax = Number(body.max_tokens ?? body.max_completion_tokens ?? DEFAULT_MAX_TOKENS);
+  const requestedMax = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : DEFAULT_MAX_TOKENS;
+  const modelCap = Number.isFinite(pin?.maxOutputTokens) && pin.maxOutputTokens > 0 ? pin.maxOutputTokens : MAX_TOKENS_CEILING;
+  const estInputTokens = Math.ceil(JSON.stringify(messages).length / 4);
+  const ctxCap = Number.isFinite(pin?.contextWindow) && pin.contextWindow > 0
+    ? Math.max(1, pin.contextWindow - estInputTokens - 1000)
+    : Infinity;
+  const maxTokens = Math.min(requestedMax, modelCap, MAX_TOKENS_CEILING, ctxCap);
+  if (requestedMax > maxTokens) {
+    console.log(`[${ts()} #${reqId}] max_tokens: 请求 ${requestedMax} → 实际 ${maxTokens}（模型上限 ${Number.isFinite(modelCap) ? modelCap : "?"}${ctxCap < Infinity ? `，上下文余量 ${ctxCap}` : ""}，硬顶 ${MAX_TOKENS_CEILING}）`);
+  }
   const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
   if (systemInjected) console.log(`[${ts()} #${reqId}] 客户端没发 system 消息 → 已补默认值（Perch hosted 要求；PERCH_DEFAULT_SYSTEM 可改/清空关闭）`);
 
