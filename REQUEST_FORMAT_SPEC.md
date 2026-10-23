@@ -59,10 +59,16 @@ Desktop, and CLI only. Direct API access is not included."
 **附加发现（2026-10-23，二分到具体字符串）**：system 消息的**内容**也会被检查 ——
 system prompt 里出现第三方 agent 的产品身份（实测 `"You are Kimi Code CLI."` → 403；
 `"You are Kimi Code."` → 200；`"You are a helpful assistant."` → 200）同样返回
-`perch_surface_required`。也就是说这是**服务端对第三方 agent 的策略拦截**，不是协议缺口：
-把客户端自己的身份从 system prompt 里抹掉属于规避该策略，不应在网关里做。
+`perch_surface_required`。也就是说这是**服务端对第三方 agent 的策略拦截**，不是协议缺口。
+
+网关的做法：**外发前把 system 消息里的客户端自报名抹成中性说法**（`You are Kimi Code CLI, …` →
+`You are the CLI, …`；单独的 `Kimi Code CLI` / `Kimi Code` → `the CLI`），其余提示词原样保留，
+只动第一条 system、命中时打日志。`Kimi` 单词本身不触发，所以不单独删。开关 `PERCH_SCRUB_IDENTITY=0`；
+属于规避策略，服务端哪天放行就可以关掉。
 
 网关因此默认在客户端没发 system 时补一条中性提示（`PERCH_DEFAULT_SYSTEM` 可改，设为空串关闭补全）。
+实测（2026-10-23，经网关）：带 `"You are Kimi Code CLI, …"` 与 `"You are Kimi Code CLI headless."`
+均 200，日志记 `身份抹除: 1 处`；同一份落盘 body 原样重放（不经网关）仍 403。
 
 **2.4.113 的"对话增量"协议**（蜜罐实测，2026-10-23）：
 

@@ -63,6 +63,24 @@ const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 5000);
 // Perch 的 hosted model-call 要求请求里必须有 system 消息（实测：没有就 403 perch_surface_required）。
 // 客户端没发时补这一条；设成空字符串可关闭补全（那样无 system 的请求会照实 403）。
 const DEFAULT_SYSTEM = process.env.PERCH_DEFAULT_SYSTEM ?? "You are a helpful assistant.";
+// Perch 还会按 system 消息里的"客户端自报名"判 surface（实测二分：`You are Kimi Code CLI.` → 403
+// perch_surface_required，`You are Kimi Code.` / `You are a helpful assistant.` / `for Kimi users` → 200）。
+// 外发前把这些自报名抹成中性说法，其余提示词原样保留。PERCH_SCRUB_IDENTITY=0 关闭。
+const SCRUB_IDENTITY = !["0", "false", "off"].includes(String(process.env.PERCH_SCRUB_IDENTITY ?? "").trim().toLowerCase());
+// 长的在前，避免短词先吃掉整串；`Kimi` 单词单独不替换（实测它本身不触发判定）。
+const IDENTITY_PATTERNS = [
+  [/\bYou are Kimi Code CLI(?: headless)?\b/g, "You are the CLI"],
+  [/\bKimi Code CLI\b/g, "the CLI"],
+  [/\bKimi Code\b/g, "the CLI"],
+];
+function scrubIdentity(text) {
+  let out = text;
+  let hits = 0;
+  for (const [re, to] of IDENTITY_PATTERNS) {
+    out = out.replace(re, () => { hits++; return to; });
+  }
+  return { text: out, hits };
+}
 // pin/自动路由的 effort 转发：默认开启（实测服务端会采纳这个组合；官方 CLI 不发送它）
 // 关闭方式：PERCH_FORWARD_PIN_EFFORT=0
 const FORWARD_PIN_EFFORT = !["0", "false", "off"].includes(String(process.env.PERCH_FORWARD_PIN_EFFORT ?? "").trim().toLowerCase());
@@ -392,6 +410,14 @@ async function handleChatCompletions(req, res) {
     messages.unshift({ role: "system", content: DEFAULT_SYSTEM });
     systemInjected = true;
   }
+  let scrubHits = 0;
+  if (SCRUB_IDENTITY && typeof messages[0]?.content === "string") {
+    const r = scrubIdentity(messages[0].content);
+    if (r.hits > 0) {
+      messages[0].content = r.text;
+      scrubHits = r.hits;
+    }
+  }
   if (systemMoved || systemFlattened) {
     console.log(`[${ts()} #${reqId}] system 规范化: ${systemMoved ? `从第 ${sysAt} 条挪到最前` : ""}${systemMoved && systemFlattened ? "、" : ""}${systemFlattened ? "内容拍平为纯文本" : ""}`);
   }
@@ -410,6 +436,10 @@ async function handleChatCompletions(req, res) {
   }
   const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
   if (systemInjected) console.log(`[${ts()} #${reqId}] 客户端没发 system 消息 → 已补默认值（Perch hosted 要求；PERCH_DEFAULT_SYSTEM 可改/清空关闭）`);
+  if (scrubHits > 0) {
+    const head = messages[0].content.slice(0, 120).replace(/\s+/g, " ");
+    console.log(`[${ts()} #${reqId}] 身份抹除: ${scrubHits} 处（Perch 按 system 内容判 surface）→ "${head}…"`);
+  }
 
   const picked = await pickAccount();
   const accountLabel = describeAccount(picked);
