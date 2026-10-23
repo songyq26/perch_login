@@ -61,28 +61,32 @@ system prompt 里出现第三方 agent 的产品身份（实测 `"You are Kimi C
 `"You are Kimi Code."` → 200；`"You are a helpful assistant."` → 200）同样返回
 `perch_surface_required`。也就是说这是**服务端对第三方 agent 的策略拦截**，不是协议缺口。
 
-网关的做法：**外发前把整条 system 换成一段固定文案**（默认 `fixed`，文案是一句
-`You are a helpful assistant.`，`PERCH_FIXED_SYSTEM` 可改）。这样换任何 agent 都不会因为它的
-system 自报名被拦，代价是 agent 自己的 system 指令不再发给上游。
+网关的做法：**外发前把整条 system 换成一段固定文案**（默认 `fixed`）。这段文案**每次启动时**从
+`perch-system-prompt.txt` 里现切：取第一行以 `## ` 开头的标题**之前**的内容（官方原文里就是
+`You are Saffron — Perch's workspace operator.` 加几行语气描述，实测 431 字）。文件更新后重启网关
+即可生效；`PERCH_FIXED_SYSTEM` 可以直接覆盖，`PERCH_SYSTEM_PROMPT_FILE` 可以换文件。
+
+这样换任何 agent 都不会因为它的 system 自报名被拦，代价是 agent 自己的 system 指令不再发给上游
+（想要就切 `merge`）。注意这 431 字带的是官方人格——回复会跟着那个语气走，不再是中性口吻。
 
 模式（`PERCH_SYSTEM_MODE`）：
-- `fixed`（默认）：整条替换成固定文案，客户端 system 丢弃，日志记 `xx 字已丢弃`
+- `fixed`（默认）：整条替换成上面切出来的那段，客户端 system 丢弃，日志记 `xx 字已丢弃`
 - `merge`：固定文案在前 + 客户端 system 接在后（先抹身份），保留 agent 指令
 - `scrub`：只抹身份、保留客户端原文（`You are Kimi Code CLI` → `You are the CLI` 等；`Kimi`
   单词本身不触发，不单独删）；`PERCH_SCRUB_IDENTITY=0` 关闭
-- `perch`：整条换成官方客户端那份 5.2 万字原文（`perch-system-prompt.txt`）
+- `perch`：整条换成官方客户端那份 5.2 万字原文（`perch-system-prompt.txt` 全文）
 - `off`：原样转发
 
-关于那份官方原文（蜜罐抓的真实 body，共 5 份样本，长度 51629～52494 字）：它不是一句身份声明，
-而是 Saffron 人格（约 8k）+ Perch 产品事实文档（约 20k）+ skills 说明（约 10k），里面提到
-`Perch Desktop` 8 次、`skill` 28 次、`browser` 19 次。把它当固定 system 会让模型扮演 Perch 的
-运营人格、引用 Perch 专属能力，与第三方 agent 的工具集不一致；实测同一模型同一问题，用它时
-上游 175s 不吐首字，用 28 字固定文案时 4.0s 出首字节、13.8s 结束。所以默认不用它，只在 `perch`
-模式下可选。
+关于那份官方原文（蜜罐抓的真实 body，共 5 份样本，长度 51629～52494 字）：第一个 `##` 之后是
+Saffron 人格细化 + Perch 产品事实文档（约 20k）+ skills 说明（约 10k），提到 `Perch Desktop`
+8 次、`skill` 28 次、`browser` 19 次，还有 `## Terminal workspace`（workspace root、Perch 自己的
+工具清单）和 `## Prior turn context`（thread id、账本、context meter，账本只取最近 18 条、每条
+摘要截 1600 字）。这些每轮都会重发，但只对 Perch 自己的客户端成立，跟第三方 agent 的工具集
+对不上。实测同一模型同一问题：全文版上游 175s 不吐首字；431 字头段版 1.3s 首字节、13.7s 出正文。
 
 实测（2026-10-23，经网关）：带 `"You are Kimi Code CLI, …"` 与 `"You are Kimi Code CLI headless."`
 均 200（`scrub` 模式，日志记 `身份抹除: 1 处`）；带第三方 CLI 自报名的 system 在 `fixed` 模式下
-200（日志记 `客户端原文 67 字已丢弃`）；同一份落盘 body 原样重放（不经网关）仍 403。
+200（日志记 `客户端原文 67 字已丢弃`，顶替文案 431 字）；同一份落盘 body 原样重放（不经网关）仍 403。
 
 **2.4.113 的"对话增量"协议**（蜜罐实测，2026-10-23）：
 

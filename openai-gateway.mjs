@@ -66,16 +66,16 @@ const KEEPALIVE_MS = Number(process.env.PERCH_KEEPALIVE_MS ?? 5000);
 const DEFAULT_SYSTEM = process.env.PERCH_DEFAULT_SYSTEM ?? "You are a helpful assistant.";
 // system 固定策略：Perch 按 system 内容判 surface —— 换一个 agent 就会带上它自己的自报名，
 // 于是又 403（实测 "You are Kimi Code CLI" → 403，中性文案 → 200）。
-// 官方客户端那份 system 是 5.2 万字的人格+产品文档（perch-system-prompt.txt，蜜罐抓的真实 body），
-// 拿它当固定值会让模型扮演 Saffron 并引用 Perch 专属能力（skill/browser/Desktop），和第三方 agent
-// 的工具对不上，实测还会把首字拖到 175s 以上——所以默认固定成一句中性文案，而不是那份长文。
-//   fixed（默认）：整条 system 换成 PERCH_FIXED_SYSTEM（一句中性文案），客户端原文丢弃
+// 官方那份 system 是 5.2 万字的人格+产品文档（perch-system-prompt.txt，蜜罐抓的真实 body）。
+// 整份照抄会让模型扮演 Saffron 并引用 Perch 专属能力（skill/browser/Desktop），和第三方 agent 的
+// 工具对不上，实测还把首字拖到 175s 以上；所以默认只取它"第一个 ## 标题之前"的那段（身份+语气，
+// 约 430 字），每次启动时从文件里现切——文件更新后重启即可生效。
+//   fixed（默认）：整条 system 换成该文件首个 ## 之前的内容，客户端原文丢弃
 //   perch：整条换成官方那份 5.2 万字原文（要完全照抄官方时才用）
 //   merge：固定文案在前 + 客户端 system 接在后（先抹身份），保留 agent 自己的指令
 //   scrub：只抹身份、保留客户端原文
 //   off：原样转发
 const SYSTEM_MODE = String(process.env.PERCH_SYSTEM_MODE ?? "fixed").trim().toLowerCase();
-const FIXED_SYSTEM = process.env.PERCH_FIXED_SYSTEM ?? DEFAULT_SYSTEM;
 const SYSTEM_PROMPT_FILE = process.env.PERCH_SYSTEM_PROMPT_FILE ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "perch-system-prompt.txt");
 const OFFICIAL_SYSTEM = await (async () => {
   try {
@@ -85,6 +85,9 @@ const OFFICIAL_SYSTEM = await (async () => {
     return null;
   }
 })();
+// 官方开头那段：第一个行首 "## " 之前（实测是 "You are Saffron — …" + 语气描述，431 字）
+const OFFICIAL_HEAD = OFFICIAL_SYSTEM ? OFFICIAL_SYSTEM.split(/^## /m)[0].trim() : null;
+const FIXED_SYSTEM = (process.env.PERCH_FIXED_SYSTEM?.trim() || OFFICIAL_HEAD || DEFAULT_SYSTEM);
 // 选定的模式不可用时退到能工作的那个：perch 需要文件，fixed 需要文案。
 const EFFECTIVE_SYSTEM_MODE = (() => {
   if (SYSTEM_MODE === "perch") return OFFICIAL_SYSTEM ? "perch" : (FIXED_SYSTEM ? "fixed" : "scrub");
@@ -986,7 +989,10 @@ server.listen(PORT, HOST, () => {
     console.log(`  API key 鉴权：未开启（本地端口谁都能访问；用 ./run.sh gateway --key auto 生成并启用）`);
   }
   console.log(`  pin/自动路由 effort 转发：${FORWARD_PIN_EFFORT ? "已开启（默认；PERCH_FORWARD_PIN_EFFORT=0 可关闭）" : "已关闭（仅档位请求携带 effort）"}`);
-  console.log(`  system 固定策略：${EFFECTIVE_SYSTEM_MODE}（顶替文案 ${REPLACEMENT_SYSTEM ? `${REPLACEMENT_SYSTEM.length} 字` : "无"}${EFFECTIVE_SYSTEM_MODE === "perch" ? `，读自 ${path.basename(SYSTEM_PROMPT_FILE)}` : ""}）；PERCH_SYSTEM_MODE=fixed|perch|merge|scrub|off 可改`);
+  const fixedSrc = process.env.PERCH_FIXED_SYSTEM?.trim() ? "PERCH_FIXED_SYSTEM" : OFFICIAL_HEAD ? `${path.basename(SYSTEM_PROMPT_FILE)} 首个 ## 之前` : "内置默认";
+  const srcNote = EFFECTIVE_SYSTEM_MODE === "perch" ? `，读自 ${path.basename(SYSTEM_PROMPT_FILE)} 全文`
+    : EFFECTIVE_SYSTEM_MODE === "fixed" || EFFECTIVE_SYSTEM_MODE === "merge" ? `，取自 ${fixedSrc}` : "";
+  console.log(`  system 固定策略：${EFFECTIVE_SYSTEM_MODE}（顶替文案 ${REPLACEMENT_SYSTEM ? `${REPLACEMENT_SYSTEM.length} 字` : "无"}${srcNote}）；PERCH_SYSTEM_MODE=fixed|perch|merge|scrub|off 可改`);
   const isLoopback = HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1";
   if (!isLoopback) {
     console.warn("  ⚠️ 监听在非本机地址（对外提供服务）：");
