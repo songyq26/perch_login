@@ -22,7 +22,7 @@ import path from "node:path";
 import {
   APP_URL, TOKEN_FILE, b64url, fetchAuthConfig, supabaseToken, sessionFromToken,
   saveSession, saveSessionAt, loadSession, loadSessionAt, ensureFresh, postJson, callModel, readSSE,
-  createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS,
+  createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, LOCALE_HEADER,
 } from "./perch-core.mjs";
 import { accountTokenFile, addAccountConfig, listAccounts, fetchAccountUsage, manualWindowState, describeAccount, pickAccount } from "./accounts.mjs";
 import { syncModels } from "./sync-models.mjs";

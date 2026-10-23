@@ -36,7 +36,7 @@ import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, ROOST_EFFORT_LEVELS } from "./perch-core.mjs";
+import { APP_URL, loadSession, ensureFresh, postJson, callModel, readSSE, createTicketManager, fallbackRunId, loadModels, resolveModel, resolveTier, roostFields, ROOST_TIERS, ROOST_EFFORT_LEVELS, LOCALE_HEADER } from "./perch-core.mjs";
 import { pickAccount, describeAccount, invalidateUsage, markExhausted } from "./accounts.mjs";
 import { syncIfStale } from "./sync-models.mjs";
 
@@ -220,6 +220,7 @@ async function getWorkspace(session, query) {
   const r = await postJson(`${APP_URL}/api/perch-terminal/cli-context`, {
     Accept: "application/json", "Content-Type": "application/json",
     Authorization: `Bearer ${session.accessToken}`,
+    ...LOCALE_HEADER,
   }, { query: (query || "/status").slice(0, 500), limitPerScope: 8 });
   const info = r.data?.session;
   if (r.status !== 200 || !info?.workspaceId) {
@@ -676,7 +677,7 @@ async function fetchAccount(session, force = false, key = "default") {
   const hit = allowanceCache.get(key);
   if (!force && hit && Date.now() - hit.at < ALLOWANCE_TTL_MS) return hit.account;
   const r = await fetch(`${APP_URL}/api/perchai/account`, {
-    headers: { Accept: "application/json", Authorization: `Bearer ${session.accessToken}` },
+    headers: { Accept: "application/json", Authorization: `Bearer ${session.accessToken}`, ...LOCALE_HEADER },
     signal: AbortSignal.timeout(8000),
   });
   const data = await r.json().catch(() => null);

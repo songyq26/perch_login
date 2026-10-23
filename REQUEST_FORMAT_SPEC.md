@@ -42,6 +42,18 @@ TSe: PERCH_CLI_APP_URL || PERCH_APP_URL || ""
 | `Authorization` | `Bearer ${token}` | `sBt()` | token 非空 |
 | `User-Agent` | `perchai-cli/${PERCH_CLI_VERSION}` | `OL()` | **仅 Node 环境**且 token 非空 |
 | `x-perch-turn-ticket` | `${ticket}` | `aue()` | ticket 存在且未过期 |
+| `x-perch-call-delta` | `1` | 硬编码（2.4.113+） | **总是**（首轮 body 是完整 `request` 也照发） |
+| `x-perch-locale` | `en`（默认） | `p0t = "x-perch-locale"` | 2.4.113+：`cli-context` / `perchai/account` / `turn-ticket` / `model-call` |
+
+**2.4.113 的"对话增量"协议**（蜜罐实测，2026-10-23）：
+
+- 响应头带 `x-perch-call-delta: 1` + `x-perch-call-held-length`（服务端已持有的消息条数）、
+  `x-perch-call-held-digest`（这些消息前缀的 SHA-256）、`x-perch-call-held-tools`（tools 的 SHA-256）。
+- 客户端下一次可以只发 `messagesDelta:{baseLength, baseDigest, newMessages}`（+ `toolsDigest`），
+  不再重发 messages/tools；服务端拒绝（409，或 400 且响应没有 `x-perch-call-delta`）时回退成完整请求。
+- **首轮没有 held 状态时，官方照样带 `x-perch-call-delta: 1` 但 body 是完整 `request`** ——
+  说明这个头是"能力声明"，不是"本次是增量"。
+- 本仓库网关目前只发"能力声明 + 完整请求"，不消费 held-* 做增量（无状态，且完整请求一直有效）。
 
 **关键细节**：
 

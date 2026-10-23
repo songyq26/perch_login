@@ -7,6 +7,10 @@ import path from "node:path";
 export const APP_URL = (process.env.PERCH_CLI_APP_URL || process.env.PERCH_APP_URL || "https://app.perchai.app").replace(/\/+$/, "");
 export const TOKEN_FILE = path.join(import.meta.dirname, "token.json");
 export const UA = "perchai-cli/unknown";
+// 官方 2.4.113 起在 cli-context / account / turn-ticket / model-call 上带 locale；
+// model-call 另外固定带 x-perch-call-delta: 1（能力声明：首轮 body 是完整 request 也照发）
+export const LOCALE = process.env.PERCH_LOCALE?.trim() || "en";
+export const LOCALE_HEADER = { "x-perch-locale": LOCALE };
 export const SUPA_CLIENT_INFO = "supabase-js-node/2.106.0";
 export const EXPIRY_MARGIN_S = 90;
 
@@ -333,6 +337,7 @@ export function createTicketManager() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "User-Agent": UA,
+          ...LOCALE_HEADER,
         },
         body: JSON.stringify(body),
         signal: ctrl.signal,
@@ -445,6 +450,8 @@ export async function callModel(session, ticketHeaders, body, signal, tokenFile 
           Accept: "text/event-stream",
           Authorization: `Bearer ${session.accessToken}`,
           "User-Agent": UA,
+          "x-perch-call-delta": "1",
+          ...LOCALE_HEADER,
           ...ticketHeaders,
         },
         body: JSON.stringify(body),

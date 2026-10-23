@@ -9,7 +9,7 @@
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { APP_URL, TOKEN_FILE, ensureFresh, loadSessionAt } from "./perch-core.mjs";
+import { APP_URL, TOKEN_FILE, ensureFresh, loadSessionAt, LOCALE_HEADER } from "./perch-core.mjs";
 
 const HERE = import.meta.dirname;
 export const ACCOUNTS_FILE = path.join(HERE, "accounts.json");
@@ -114,7 +114,7 @@ export async function fetchAccountUsage(account, { force = false, ttlMs } = {}) 
   const session = await ensureFresh(account.session, false, account.tokenFile ?? undefined);
   account.session = session;
   const r = await fetch(`${session.appUrl || APP_URL}/api/perchai/account`, {
-    headers: { Accept: "application/json", Authorization: `Bearer ${session.accessToken}` },
+    headers: { Accept: "application/json", Authorization: `Bearer ${session.accessToken}`, ...LOCALE_HEADER },
     signal: AbortSignal.timeout(8000),
   });
   const data = await r.json().catch(() => null);
